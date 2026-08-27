@@ -215,7 +215,16 @@ on a phone and Add to Home Screen: an https origin is also what the service
 worker and PWA install need, which is why a `http://192.168.x.x` LAN address
 cannot do the job.
 
-Who can sign in is controlled by `ALLOWED_EMAILS` — a comma-separated list.
+Who can sign in is controlled in two places, and they do different jobs:
+
+- `supabase/migrations/003_signup_allowlist.sql` decides who may **create an
+  account**. It is a table plus a trigger on `auth.users`; an empty table means
+  anyone may join.
+- `ALLOWED_EMAILS` decides who may **use the shared Gemini key** and the upload
+  signer. It is read by the server, which Supabase knows nothing about — so
+  setting it alone does not stop signups.
+
+`ALLOWED_EMAILS` is a comma-separated list.
 Leave it empty and anyone with a Google account can create one and spend your
 Gemini quota. Funded AI actions per account per month come from
 `AI_MONTHLY_CAP`; past it, people are asked for their own key in Settings.
