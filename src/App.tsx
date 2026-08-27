@@ -53,6 +53,7 @@ import { InvestScreen } from './components/InvestScreen';
 import { IncomeScreen } from './components/IncomeScreen';
 import { CollectModal, LoanModal, SettleLoanModal, SourceModal } from './components/IncomeModals';
 import { AgentModal } from './components/AgentModal';
+import { AccessModal } from './components/AccessModal';
 import { CategoryModal } from './components/CategoryModal';
 import {
   AddInvestmentModal,
@@ -70,7 +71,13 @@ import { ProfileModal } from './components/ProfileModal';
 import { QuickAddModal, ScanBillModal } from './components/CaptureModals';
 import { BriefBanner, CaptureDial, SignalsSection } from './components/Signals';
 
-export default function App({ session }: { session?: Session | null }) {
+export default function App({
+  session,
+  isAdmin = false,
+}: {
+  session?: Session | null;
+  isAdmin?: boolean;
+}) {
   // The account this browser is writing as. `null` means local-only mode.
   const userId = session?.user.id ?? null;
 
@@ -116,6 +123,7 @@ export default function App({ session }: { session?: Session | null }) {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isAgentOpen, setIsAgentOpen] = useState(false);
   const [isCategoriesOpen, setIsCategoriesOpen] = useState(false);
+  const [isAccessOpen, setIsAccessOpen] = useState(false);
   const [isSourceOpen, setIsSourceOpen] = useState(false);
   const [editingSource, setEditingSource] = useState<IncomeSource | null>(null);
   const [collecting, setCollecting] = useState<DueView | null>(null);
@@ -1031,6 +1039,8 @@ export default function App({ session }: { session?: Session | null }) {
         onAddTransaction={handleAddTransaction}
       />
 
+      <AccessModal isOpen={isAccessOpen} onClose={() => setIsAccessOpen(false)} />
+
       <CategoryModal
         isOpen={isCategoriesOpen}
         onClose={() => setIsCategoriesOpen(false)}
@@ -1202,6 +1212,11 @@ export default function App({ session }: { session?: Session | null }) {
         incomeDues={incomeDues}
         loans={liveLoans}
         accountEmail={session?.user.email ?? null}
+        isAdmin={isAdmin}
+        onOpenAccess={() => {
+          setIsProfileOpen(false);
+          setIsAccessOpen(true);
+        }}
         onSignOut={() => {
           void signOut().then(() => window.location.reload());
         }}

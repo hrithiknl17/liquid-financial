@@ -90,3 +90,82 @@ export async function googleSignInAvailable(): Promise<boolean> {
     return true;
   }
 }
+
+/* ========================= ACCESS APPROVAL ========================= */
+
+export interface AccessState {
+  approved: boolean;
+  admin: boolean;
+  email: string | null;
+}
+
+export interface PendingAccount {
+  email: string;
+  displayName: string | null;
+  requestedAt: string;
+}
+
+export interface ApprovedAccount {
+  email: string;
+  isAdmin: boolean;
+  addedAt: string;
+}
+
+/**
+ * Whether this account may use the app yet.
+ *
+ * An unapproved account exists and is perfectly isolated by row level
+ * security; it simply has nothing to show and cannot call the server. Errors
+ * resolve to "not approved" so a network blip never hands out access.
+ */
+export async function fetchAccess(): Promise<AccessState> {
+  if (!supabase) return { approved: false, admin: false, email: null };
+
+  const { data: userData } = await supabase.auth.getUser();
+  const email = userData.user?.email ?? null;
+
+  const [{ data: profile }, { data: admin }] = await Promise.all([
+    supabase.from('profiles').select('approved').maybeSingle(),
+    supabase.rpc('is_admin'),
+  ]);
+
+  return {
+    approved: Boolean(profile?.approved),
+    admin: Boolean(admin),
+    email,
+  };
+}
+
+export async function fetchPending(): Promise<PendingAccount[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase.rpc('pending_accounts');
+  if (error || !data) return [];
+  return (data as { email: string; display_name: string | null; requested_at: string }[]).map((row) => ({
+    email: row.email,
+    displayName: row.display_name,
+    requestedAt: row.requested_at,
+  }));
+}
+
+export async function fetchApproved(): Promise<ApprovedAccount[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase.rpc('approved_accounts');
+  if (error || !data) return [];
+  return (data as { email: string; is_admin: boolean; added_at: string }[]).map((row) => ({
+    email: row.email,
+    isAdmin: row.is_admin,
+    addedAt: row.added_at,
+  }));
+}
+
+export async function approveAccount(email: string): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.rpc('approve_account', { target_email: email });
+  if (error) throw error;
+}
+
+export async function revokeAccount(email: string): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.rpc('revoke_account', { target_email: email });
+  if (error) throw error;
+}

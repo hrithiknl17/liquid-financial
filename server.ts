@@ -73,8 +73,29 @@ async function resolveCaller(req: Request): Promise<Caller | null> {
   }
 }
 
-function allowed(caller: Caller): boolean {
-  return ALLOWED_EMAILS.length === 0 || ALLOWED_EMAILS.includes(caller.email);
+/**
+ * Access is decided by the database now: an account is allowed once it has
+ * been approved in the app. ALLOWED_EMAILS stays as an override so the owner
+ * can always get in, even before any approval exists.
+ */
+async function allowed(caller: Caller): Promise<boolean> {
+  if (ALLOWED_EMAILS.includes(caller.email)) return true;
+  if (!cloudReady) return ALLOWED_EMAILS.length === 0;
+
+  try {
+    const response = await fetch(
+      `${SUPABASE_URL}/rest/v1/profiles?id=eq.${caller.id}&select=approved`,
+      {
+        headers: { apikey: SERVICE_ROLE as string, Authorization: `Bearer ${SERVICE_ROLE}` },
+        signal: AbortSignal.timeout(8_000),
+      }
+    );
+    const rows = (await response.json()) as { approved?: boolean }[];
+    return Boolean(rows?.[0]?.approved);
+  } catch {
+    // Fail closed: an unreachable database must not hand out the shared key.
+    return false;
+  }
 }
 
 /**
@@ -162,7 +183,7 @@ app.post('/api/ai/generate', async (req, res) => {
       res.status(401).json({ error: 'Sign in to use the shared Gemini key, or add your own in Settings.' });
       return;
     }
-    if (!allowed(caller)) {
+    if (!(await allowed(caller))) {
       res.status(403).json({ error: 'This account is not on the allowlist yet.' });
       return;
     }
@@ -212,7 +233,7 @@ app.post('/api/uploads/sign', async (req: Request, res: Response) => {
     res.status(401).json({ error: 'Sign in to upload bill photos.' });
     return;
   }
-  if (!allowed(caller)) {
+  if (!(await allowed(caller))) {
     res.status(403).json({ error: 'This account is not on the allowlist yet.' });
     return;
   }

@@ -36,6 +36,8 @@ interface ProfileModalProps {
   onOpenCategories: () => void;
   /** Null in local-only mode, which hides the account controls entirely. */
   accountEmail: string | null;
+  isAdmin: boolean;
+  onOpenAccess: () => void;
   onSignOut: () => void;
   onDeleteAccount: () => void;
   onLoadDemo: () => void;
@@ -67,6 +69,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   loans,
   onOpenCategories,
   accountEmail,
+  isAdmin,
+  onOpenAccess,
   onSignOut,
   onDeleteAccount,
   onLoadDemo,
@@ -415,6 +419,21 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       )}
 
       <div className="space-y-2.5">
+        {isAdmin && (
+          <button
+            onClick={onOpenAccess}
+            className="w-full flex items-center justify-between px-4 py-3 bg-[#fef3c7] border-2 border-slate-900 rounded-2xl shadow-[3px_3px_0px_0px_#0f172a] hover:bg-[#fde68a] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all cursor-pointer"
+          >
+            <span className="flex items-center gap-2.5">
+              <span className="material-symbols-outlined text-[20px] text-slate-700">key</span>
+              <span className="text-xs font-black uppercase tracking-wider text-slate-900">Who can get in</span>
+            </span>
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+              Approve requests
+            </span>
+          </button>
+        )}
+
         <button
           onClick={onOpenCategories}
           className="w-full flex items-center justify-between px-4 py-3 bg-white border-2 border-slate-900 rounded-2xl shadow-[3px_3px_0px_0px_#0f172a] hover:bg-slate-50 active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all cursor-pointer"
