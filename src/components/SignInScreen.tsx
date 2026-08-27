@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { googleSignInAvailable, signInWithGoogle } from '../lib/cloud';
+import { googleSignInAvailable, initialAuthError, signInWithGoogle } from '../lib/cloud';
 
 interface SignInScreenProps {
   /** Keeps this browser on the original local-only app, no account at all. */
@@ -12,11 +12,18 @@ interface SignInScreenProps {
 
 export const SignInScreen: React.FC<SignInScreenProps> = ({ onStayLocal, onTryDemo, hasLocalData }) => {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialAuthError);
   const [googleReady, setGoogleReady] = useState<boolean | null>(null);
 
   useEffect(() => {
     void googleSignInAvailable().then(setGoogleReady);
+
+    // Belt and braces: the fragment is cleared when the error is captured at
+    // import time, but a reload that races the client would otherwise leave
+    // the message stuck on screen forever.
+    if (window.location.hash.includes('error')) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
   }, []);
 
   const start = async () => {
@@ -43,62 +50,69 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({ onStayLocal, onTryDe
         </div>
 
         <h2 className="font-display text-3xl font-black tracking-tight text-slate-900 leading-tight">
-          Your money, on every device.
+          Photograph a bill.
+          <br />
+          It fills itself in.
         </h2>
         <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mt-3 leading-relaxed">
-          Sign in and your ledger, rent and holdings follow you from laptop to phone. Nobody else can
-          see them — not other accounts, not the people who pay you rent.
+          Spending, subscriptions, investments, rent you are owed and money you lent — with an assistant
+          you can just talk to.
         </p>
 
+        {/* The demo is the front door: no account, nothing uploaded, works now. */}
         <button
-          onClick={() => void start()}
-          disabled={busy || googleReady === false}
-          className="mt-8 w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xs font-black uppercase tracking-widest border-2 border-slate-900 shadow-[4px_4px_0px_0px_#4f46e5] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+          onClick={onTryDemo}
+          className="mt-8 w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xs font-black uppercase tracking-widest border-2 border-slate-900 shadow-[4px_4px_0px_0px_#4f46e5] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all cursor-pointer"
         >
-          {busy ? (
-            <>
-              <span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>
-              Opening Google
-            </>
-          ) : (
-            'Continue with Google'
-          )}
+          Try it with sample data
         </button>
-
-        {googleReady === false && (
-          <p className="mt-4 text-xs font-bold text-amber-800 bg-amber-50 border-2 border-slate-900 rounded-2xl px-4 py-3 leading-relaxed">
-            Google sign-in is not switched on for this project yet. Enable it in Supabase under
-            Authentication → Providers → Google. Until then, use this device only.
-          </p>
-        )}
+        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mt-2.5 text-center leading-relaxed">
+          A full ledger to poke at. Stays in this browser, nothing is uploaded.
+        </p>
 
         {error && (
-          <p className="mt-4 text-xs font-bold text-rose-700 bg-rose-50 border-2 border-slate-900 rounded-2xl px-4 py-3 leading-relaxed">
+          <p className="mt-5 text-xs font-bold text-amber-900 bg-amber-50 border-2 border-slate-900 rounded-2xl px-4 py-3 leading-relaxed">
             {error}
           </p>
         )}
 
         <div className="mt-8 pt-6 border-t-2 border-slate-100 space-y-2.5">
-          {!hasLocalData && (
-            <button
-              onClick={onTryDemo}
-              className="w-full py-3 bg-[#ede9fe] border-2 border-slate-900 rounded-2xl text-xs font-black uppercase tracking-wider text-slate-900 shadow-[3px_3px_0px_0px_#0f172a] hover:bg-[#ddd6fe] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all cursor-pointer"
-            >
-              Try it with sample data
-            </button>
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 text-center">
+            Want your own?
+          </p>
+
+          <button
+            onClick={() => void start()}
+            disabled={busy || googleReady === false}
+            className="w-full py-3 border-2 border-slate-900 rounded-2xl text-xs font-black uppercase tracking-wider text-slate-700 hover:bg-slate-50 shadow-[3px_3px_0px_0px_#0f172a] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {busy ? (
+              <>
+                <span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>
+                Opening Google
+              </>
+            ) : (
+              'Continue with Google'
+            )}
+          </button>
+
+          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 text-center leading-relaxed">
+            Accounts are approved by hand while this is small — sign in and you go on the list. Your data
+            syncs across your devices and nobody else can see it.
+          </p>
+
+          {googleReady === false && (
+            <p className="text-[11px] font-black uppercase tracking-wider text-amber-800 bg-amber-50 border-2 border-slate-900 rounded-2xl px-4 py-3 leading-relaxed">
+              Google sign-in is not switched on for this project yet.
+            </p>
           )}
 
           <button
             onClick={onStayLocal}
-            className="w-full py-3 border-2 border-slate-900 rounded-2xl text-xs font-black uppercase tracking-wider text-slate-600 hover:bg-slate-100 cursor-pointer transition-colors"
+            className="w-full py-2.5 text-[10px] font-black uppercase tracking-wider text-slate-400 hover:text-slate-900 cursor-pointer transition-colors"
           >
-            Use this device only
+            {hasLocalData ? 'Keep using this device only' : 'Start empty on this device'}
           </button>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mt-3 leading-relaxed text-center">
-            {hasLocalData
-              ? 'Keeps the data already in this browser. Nothing is uploaded. You can sign in later and bring it with you.'
-              : 'No account, no sync. Everything stays in this browser, exactly as before.'}
-          </p>
         </div>
       </div>
     </main>

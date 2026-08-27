@@ -10,6 +10,35 @@ const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
 export const cloudConfigured = Boolean(url && anonKey);
 
+/**
+ * An OAuth failure arrives in the URL fragment, and creating the client below
+ * consumes that fragment. So it has to be read here, at import time, before
+ * anything else touches the URL — otherwise the reason is gone by the time a
+ * component could show it.
+ */
+function readInitialAuthError(): string | null {
+  if (typeof window === 'undefined') return null;
+
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const query = new URLSearchParams(window.location.search);
+  const code = hash.get('error') ?? query.get('error');
+  if (!code) return null;
+
+  const description = (hash.get('error_description') ?? query.get('error_description') ?? '').replace(
+    /\+/g,
+    ' '
+  );
+  window.history.replaceState({}, '', window.location.pathname);
+
+  if (/not invited|allowlist|insufficient|saving new user/i.test(description)) {
+    return 'Accounts are invite-only at the moment. Ask for access and you will be let in.';
+  }
+  if (code === 'access_denied') return 'Google sign-in was cancelled.';
+  return description || 'Google sign-in did not go through.';
+}
+
+export const initialAuthError = readInitialAuthError();
+
 export const supabase: SupabaseClient | null = cloudConfigured
   ? createClient(url as string, anonKey as string, {
       auth: {
