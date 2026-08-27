@@ -90,7 +90,8 @@ export async function callGemini(
 
   if (!viaProxy && !key) {
     throw new AiUnavailableError(
-      'No Gemini key available. Start the server with GEMINI_API_KEY set, or add your key in Settings.'
+      'Bill scanning and the assistant need a Gemini key. Add your own in Settings — it stays in this ' +
+        'browser and is never uploaded. Everything else in the app works without one.'
     );
   }
 

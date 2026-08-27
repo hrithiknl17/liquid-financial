@@ -22,7 +22,8 @@ export type Collection =
   | 'investments'
   | 'income_sources'
   | 'income_dues'
-  | 'loans';
+  | 'loans'
+  | 'categories';
 
 interface QueuedWrite {
   id: string;

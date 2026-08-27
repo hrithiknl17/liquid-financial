@@ -1,10 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { IncomeDue, IncomeSource, Investment, Loan, Settings, Subscription, Transaction } from '../types';
+import {
+  CustomCategory,
+  IncomeDue,
+  IncomeSource,
+  Investment,
+  Loan,
+  Settings,
+  Subscription,
+  Transaction,
+} from '../types';
 import { supabase } from './cloud';
 import {
+  categoryToRow,
   dueToRow,
   invToRow,
   loanToRow,
+  rowToCategory,
   rowToDue,
   rowToInv,
   rowToLoan,
@@ -24,6 +35,7 @@ export interface CloudData {
   incomeSources: IncomeSource[];
   incomeDues: IncomeDue[];
   loans: Loan[];
+  categories: CustomCategory[];
   settings?: Partial<Settings>;
 }
 
@@ -43,6 +55,7 @@ interface Snapshot {
   incomeSources: IncomeSource[];
   incomeDues: IncomeDue[];
   loans: Loan[];
+  categories: CustomCategory[];
 }
 
 const MAPPERS: {
@@ -54,6 +67,7 @@ const MAPPERS: {
   incomeSources: { table: 'income_sources', toRow: (src) => sourceToRow(src as IncomeSource) },
   incomeDues: { table: 'income_dues', toRow: (due) => dueToRow(due as IncomeDue) },
   loans: { table: 'loans', toRow: (loan) => loanToRow(loan as Loan) },
+  categories: { table: 'categories', toRow: (cat) => categoryToRow(cat as CustomCategory) },
 };
 
 /** Rows keyed by id, so a diff is a map comparison rather than a deep scan. */
@@ -83,16 +97,17 @@ export function useCloudSync(userId: string | null, snapshot: Snapshot, onPulled
     setStatus({ state: 'loading', pending: pendingCount() });
 
     try {
-      const [txs, subs, invs, sources, dues, loans] = await Promise.all([
+      const [txs, subs, invs, sources, dues, loans, cats] = await Promise.all([
         supabase.from('transactions').select('*').eq('user_id', userId),
         supabase.from('subscriptions').select('*').eq('user_id', userId),
         supabase.from('investments').select('*').eq('user_id', userId),
         supabase.from('income_sources').select('*').eq('user_id', userId),
         supabase.from('income_dues').select('*').eq('user_id', userId),
         supabase.from('loans').select('*').eq('user_id', userId),
+        supabase.from('categories').select('*').eq('user_id', userId),
       ]);
 
-      const firstError = [txs, subs, invs, sources, dues, loans].find((r) => r.error)?.error;
+      const firstError = [txs, subs, invs, sources, dues, loans, cats].find((r) => r.error)?.error;
       if (firstError) {
         setStatus({ state: 'error', pending: pendingCount(), message: firstError.message });
         return;
@@ -105,6 +120,7 @@ export function useCloudSync(userId: string | null, snapshot: Snapshot, onPulled
         incomeSources: (sources.data ?? []).map(rowToSource),
         incomeDues: (dues.data ?? []).map(rowToDue),
         loans: (loans.data ?? []).map(rowToLoan),
+        categories: (cats.data ?? []).map(rowToCategory),
       };
 
       const cloudIsEmpty =
@@ -112,14 +128,16 @@ export function useCloudSync(userId: string | null, snapshot: Snapshot, onPulled
         data.subscriptions.length === 0 &&
         data.investments.length === 0 &&
         data.incomeSources.length === 0 &&
-        data.loans.length === 0;
+        data.loans.length === 0 &&
+        data.categories.length === 0;
 
       const localHasData =
         snapshot.transactions.length > 0 ||
         snapshot.subscriptions.length > 0 ||
         snapshot.investments.length > 0 ||
         snapshot.incomeSources.length > 0 ||
-        snapshot.loans.length > 0;
+        snapshot.loans.length > 0 ||
+        snapshot.categories.length > 0;
 
       // First sign-in on a browser that already had data: keep what is here and
       // let the push below upload it, rather than wiping it with an empty cloud.

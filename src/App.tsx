@@ -42,6 +42,7 @@ import {
   repaymentTransaction,
 } from './lib/loans';
 import { AgentState, ChatTurn, ProposedAction } from './lib/agent';
+import { deleteAccount, signOut } from './lib/cloud';
 import { CloudData, useCloudSync } from './lib/useCloudSync';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
@@ -130,8 +131,8 @@ export default function App({ session }: { session?: Session | null }) {
 
   /** What sync compares against; every collection the cloud mirrors. */
   const snapshot = useMemo(
-    () => ({ transactions, subscriptions, investments, incomeSources, incomeDues, loans }),
-    [transactions, subscriptions, investments, incomeSources, incomeDues, loans]
+    () => ({ transactions, subscriptions, investments, incomeSources, incomeDues, loans, categories }),
+    [transactions, subscriptions, investments, incomeSources, incomeDues, loans, categories]
   );
 
   /** Replaces local state with whatever the account holds. */
@@ -142,6 +143,7 @@ export default function App({ session }: { session?: Session | null }) {
     setIncomeSources(data.incomeSources);
     setIncomeDues(data.incomeDues);
     setLoans(data.loans);
+    setCategories(data.categories);
   }, []);
 
   const { status: syncStatus } = useCloudSync(userId, snapshot, handlePulled);
@@ -1199,6 +1201,18 @@ export default function App({ session }: { session?: Session | null }) {
         incomeSources={incomeSources}
         incomeDues={incomeDues}
         loans={liveLoans}
+        accountEmail={session?.user.email ?? null}
+        onSignOut={() => {
+          void signOut().then(() => window.location.reload());
+        }}
+        onDeleteAccount={() => {
+          void deleteAccount()
+            .then(() => {
+              clearAll(Object.values(KEYS));
+              window.location.reload();
+            })
+            .catch(() => showToast('Could not delete the account'));
+        }}
         onOpenCategories={() => {
           setIsProfileOpen(false);
           setIsCategoriesOpen(true);

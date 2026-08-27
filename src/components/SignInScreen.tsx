@@ -4,11 +4,13 @@ import { googleSignInAvailable, signInWithGoogle } from '../lib/cloud';
 interface SignInScreenProps {
   /** Keeps this browser on the original local-only app, no account at all. */
   onStayLocal: () => void;
+  /** Fills this browser with sample data and opens it, no account either. */
+  onTryDemo: () => void;
   /** True when there is already data in this browser to bring along. */
   hasLocalData: boolean;
 }
 
-export const SignInScreen: React.FC<SignInScreenProps> = ({ onStayLocal, hasLocalData }) => {
+export const SignInScreen: React.FC<SignInScreenProps> = ({ onStayLocal, onTryDemo, hasLocalData }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [googleReady, setGoogleReady] = useState<boolean | null>(null);
@@ -76,7 +78,16 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({ onStayLocal, hasLoca
           </p>
         )}
 
-        <div className="mt-8 pt-6 border-t-2 border-slate-100">
+        <div className="mt-8 pt-6 border-t-2 border-slate-100 space-y-2.5">
+          {!hasLocalData && (
+            <button
+              onClick={onTryDemo}
+              className="w-full py-3 bg-[#ede9fe] border-2 border-slate-900 rounded-2xl text-xs font-black uppercase tracking-wider text-slate-900 shadow-[3px_3px_0px_0px_#0f172a] hover:bg-[#ddd6fe] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all cursor-pointer"
+            >
+              Try it with sample data
+            </button>
+          )}
+
           <button
             onClick={onStayLocal}
             className="w-full py-3 border-2 border-slate-900 rounded-2xl text-xs font-black uppercase tracking-wider text-slate-600 hover:bg-slate-100 cursor-pointer transition-colors"

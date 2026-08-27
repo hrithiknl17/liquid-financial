@@ -130,6 +130,16 @@ create table if not exists public.loans (
   primary key (user_id, id)
 );
 
+create table if not exists public.categories (
+  id text not null,
+  user_id uuid not null references auth.users on delete cascade,
+  name text not null,
+  kind text not null check (kind in ('expense', 'income')),
+  icon_name text not null,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, id)
+);
+
 -- One row per account per month, so the server can cap funded Gemini calls.
 create table if not exists public.ai_usage (
   user_id uuid not null references auth.users on delete cascade,
@@ -151,6 +161,7 @@ alter table public.investments enable row level security;
 alter table public.income_sources enable row level security;
 alter table public.income_dues enable row level security;
 alter table public.loans enable row level security;
+alter table public.categories enable row level security;
 alter table public.ai_usage enable row level security;
 
 do $$
@@ -159,7 +170,7 @@ declare
 begin
   foreach t in array array[
     'transactions', 'subscriptions', 'investments',
-    'income_sources', 'income_dues', 'loans'
+    'income_sources', 'income_dues', 'loans', 'categories'
   ] loop
     execute format($f$
       drop policy if exists "own rows" on public.%I;
@@ -187,6 +198,7 @@ create index if not exists transactions_user_date_idx on public.transactions (us
 create index if not exists transactions_due_idx on public.transactions (user_id, due_id) where due_id is not null;
 create index if not exists transactions_loan_idx on public.transactions (user_id, loan_id) where loan_id is not null;
 create index if not exists dues_user_source_idx on public.income_dues (user_id, source_id);
+create unique index if not exists categories_user_name_idx on public.categories (user_id, lower(name));
 
 -- ======================== NEW ACCOUNTS ========================
 --

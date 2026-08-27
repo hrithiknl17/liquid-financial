@@ -41,6 +41,18 @@ export async function signOut(): Promise<void> {
   await supabase?.auth.signOut();
 }
 
+/**
+ * Removes the account and everything in it. The row for each table cascades
+ * from auth.users, so one call takes the lot; the RPC runs as the definer and
+ * only ever deletes the caller.
+ */
+export async function deleteAccount(): Promise<void> {
+  if (!supabase) throw new Error('Cloud accounts are not configured in this build.');
+  const { error } = await supabase.rpc('delete_my_account');
+  if (error) throw error;
+  await supabase.auth.signOut();
+}
+
 export function currentUserId(session: Session | null): string | null {
   return session?.user.id ?? null;
 }

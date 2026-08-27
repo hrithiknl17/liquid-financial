@@ -1,7 +1,8 @@
 import { Fragment } from 'react';
 import App from './App';
 import { SignInScreen } from './components/SignInScreen';
-import { KEYS, load } from './lib/storage';
+import { KEYS, load, save } from './lib/storage';
+import { buildDemoData } from './data/initialData';
 import { useSession } from './lib/useSession';
 
 /**
@@ -24,7 +25,19 @@ export default function Root() {
 
   if (status === 'signed-out') {
     const hasLocalData = load<unknown[]>(KEYS.transactions, []).length > 0;
-    return <SignInScreen onStayLocal={stayLocal} hasLocalData={hasLocalData} />;
+
+    // A stranger should be able to look around in one click: seed the sample
+    // ledger into this browser and open it, no account, nothing uploaded.
+    const tryDemo = () => {
+      const demo = buildDemoData();
+      save(KEYS.transactions, demo.transactions);
+      save(KEYS.subscriptions, demo.subscriptions);
+      save(KEYS.investments, demo.investments);
+      save(KEYS.settings, demo.settings);
+      stayLocal();
+    };
+
+    return <SignInScreen onStayLocal={stayLocal} onTryDemo={tryDemo} hasLocalData={hasLocalData} />;
   }
 
   // "Use this device only" means exactly that: even with a valid session in

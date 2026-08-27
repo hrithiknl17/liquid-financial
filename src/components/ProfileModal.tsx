@@ -34,6 +34,10 @@ interface ProfileModalProps {
   incomeDues: IncomeDue[];
   loans: Loan[];
   onOpenCategories: () => void;
+  /** Null in local-only mode, which hides the account controls entirely. */
+  accountEmail: string | null;
+  onSignOut: () => void;
+  onDeleteAccount: () => void;
   onLoadDemo: () => void;
   onResetData: () => void;
   onImport: (payload: {
@@ -62,11 +66,15 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   incomeDues,
   loans,
   onOpenCategories,
+  accountEmail,
+  onSignOut,
+  onDeleteAccount,
   onLoadDemo,
   onResetData,
   onImport,
 }) => {
   const [confirmReset, setConfirmReset] = useState(false);
+  const [confirmDeleteAccount, setConfirmDeleteAccount] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [ai, setAi] = useState<AiStatus | null>(null);
   const [keyDraft, setKeyDraft] = useState(settings.geminiApiKey ?? '');
@@ -358,9 +366,53 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
         </div>
         <div className="flex justify-between py-1.5">
           <span className="text-slate-400 uppercase tracking-wider">Storage</span>
-          <span className="font-black text-emerald-600">This device only</span>
+          <span className="font-black text-emerald-600">
+            {accountEmail ? 'Synced to your account' : 'This device only'}
+          </span>
         </div>
       </div>
+
+      {accountEmail && (
+        <div className="mb-5 p-4 bg-white border-2 border-slate-900 rounded-2xl shadow-[3px_3px_0px_0px_#0f172a]">
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Signed in as</p>
+          <p className="text-xs font-black text-slate-900 truncate mb-3">{accountEmail}</p>
+
+          <div className="flex gap-2.5">
+            <button onClick={onSignOut} className={`flex-1 ${ghostButtonClass}`}>
+              Sign out
+            </button>
+            <button
+              onClick={() => setConfirmDeleteAccount(true)}
+              className="flex-1 py-3 border-2 border-rose-300 rounded-2xl text-xs font-black uppercase tracking-wider text-rose-600 hover:border-rose-600 hover:bg-rose-50 cursor-pointer transition-colors"
+            >
+              Delete account
+            </button>
+          </div>
+
+          {confirmDeleteAccount && (
+            <div className="mt-3 p-4 bg-rose-50 border-2 border-slate-900 rounded-2xl">
+              <p className="text-xs font-bold text-rose-900 leading-relaxed">
+                This deletes your account and every transaction, plan, holding, rent source and loan in it.
+                It cannot be undone. Export a backup first if you want a copy.
+              </p>
+              <div className="flex gap-2.5 mt-3">
+                <button
+                  onClick={() => setConfirmDeleteAccount(false)}
+                  className="flex-1 py-2.5 border-2 border-slate-900 rounded-2xl text-[11px] font-black uppercase tracking-wider text-slate-600 hover:bg-white cursor-pointer"
+                >
+                  Keep my account
+                </button>
+                <button
+                  onClick={onDeleteAccount}
+                  className="flex-1 py-2.5 bg-rose-600 text-white rounded-2xl text-[11px] font-black uppercase tracking-wider border-2 border-slate-900 cursor-pointer"
+                >
+                  Delete everything
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="space-y-2.5">
         <button

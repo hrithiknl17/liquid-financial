@@ -1,4 +1,5 @@
 import {
+  CustomCategory,
   IncomeDue,
   IncomeSource,
   Investment,
@@ -211,6 +212,26 @@ export function rowToDue(row: Row): IncomeDue {
     received: 0,
     status: row.waived ? 'waived' : 'pending',
     note: str(row.note),
+  };
+}
+
+/* ============================ CATEGORIES ============================ */
+
+export function categoryToRow(category: CustomCategory): Row {
+  return {
+    id: category.id,
+    name: category.name,
+    kind: category.kind,
+    icon_name: category.iconName,
+  };
+}
+
+export function rowToCategory(row: Row): CustomCategory {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    kind: row.kind as CustomCategory['kind'],
+    iconName: String(row.icon_name),
   };
 }
 
