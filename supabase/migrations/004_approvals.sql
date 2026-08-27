@@ -7,7 +7,8 @@
 --
 -- Run in the Supabase SQL editor. Safe to re-run.
 
--- 003's trigger would block the very signups we now want to capture.
+-- 003 (deleted) blocked signups with a trigger; this drops it, so running
+-- this file is safe whether or not that one was ever run.
 drop trigger if exists on_auth_user_signup_allowlist on auth.users;
 drop function if exists public.enforce_signup_allowlist();
 
