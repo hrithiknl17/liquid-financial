@@ -27,11 +27,15 @@ export default function Root() {
     return <SignInScreen onStayLocal={stayLocal} hasLocalData={hasLocalData} />;
   }
 
+  // "Use this device only" means exactly that: even with a valid session in
+  // this browser, App is handed nothing, so nothing syncs.
+  const activeSession = status === 'signed-in' ? session : null;
+
   // Keying the subtree on the account id remounts App on a switch, so no data
   // from the previous account can survive in component state.
   return (
-    <Fragment key={session?.user.id ?? 'local'}>
-      <App session={session} />
+    <Fragment key={activeSession?.user.id ?? 'local'}>
+      <App session={activeSession} />
     </Fragment>
   );
 }

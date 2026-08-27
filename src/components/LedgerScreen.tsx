@@ -18,6 +18,7 @@ import {
 } from '../lib/finance';
 import { basketPriceMoves, itemHistory } from '../lib/insights';
 import { EmptyState, Pill, SectionHeading } from './ui';
+import { CalendarView } from './CalendarView';
 
 interface LedgerScreenProps {
   summary: AccountSummary;
@@ -50,10 +51,18 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showFilterDrawer, setShowFilterDrawer] = useState<boolean>(false);
   const [scope, setScope] = useState<'month' | 'all'>('month');
+  const [view, setView] = useState<'list' | 'calendar'>('list');
+  /** Day the calendar is focused on, as ISO. */
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   const monthTransactions = useMemo(
     () => (scope === 'all' ? transactions : transactions.filter((tx) => monthKey(tx.date) === activeMonth)),
     [transactions, activeMonth, scope]
+  );
+
+  const calendarTransactions = useMemo(
+    () => transactions.filter((tx) => monthKey(tx.date) === activeMonth),
+    [transactions, activeMonth]
   );
 
   const categories = useMemo(() => {
@@ -363,9 +372,13 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({
           <SectionHeading
             eyebrow="Ledger Database"
             title="Transactions"
-            sub={`${filteredTransactions.length} entr${filteredTransactions.length === 1 ? 'y' : 'ies'} • ${
-              scope === 'all' ? 'All time' : monthLabel(activeMonth)
-            }`}
+            sub={
+              view === 'calendar'
+                ? monthLabel(activeMonth)
+                : `${filteredTransactions.length} entr${filteredTransactions.length === 1 ? 'y' : 'ies'} • ${
+                    scope === 'all' ? 'All time' : monthLabel(activeMonth)
+                  }`
+            }
           />
 
           <div className="flex items-center gap-2 shrink-0">
@@ -403,7 +416,27 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({
           </div>
         </div>
 
-        {(showFilterDrawer || selectedCategory !== 'All') && (
+        <div className="flex gap-2 mb-5">
+          <Pill active={view === 'list'} onClick={() => setView('list')}>
+            List
+          </Pill>
+          <Pill active={view === 'calendar'} onClick={() => setView('calendar')}>
+            Calendar
+          </Pill>
+        </div>
+
+        {view === 'calendar' && (
+          <CalendarView
+            transactions={calendarTransactions}
+            activeMonth={activeMonth}
+            settings={settings}
+            selectedDay={selectedDay}
+            onSelectDay={setSelectedDay}
+            onSelectTransaction={onSelectTransaction}
+          />
+        )}
+
+        {view === 'list' && (showFilterDrawer || selectedCategory !== 'All') && (
           <div className="mb-6 p-5 bg-white border-2 border-slate-900 rounded-[2rem] shadow-[4px_4px_0px_0px_#0f172a] flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-black uppercase tracking-wider text-slate-700">Range</span>
@@ -453,7 +486,7 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({
           </div>
         )}
 
-        {groupedTransactions.length === 0 ? (
+        {view === 'list' && (groupedTransactions.length === 0 ? (
           <EmptyState
             icon="receipt_long"
             title={transactions.length === 0 ? 'Your ledger is empty' : 'Nothing matches'}
@@ -525,7 +558,7 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({
               );
             })}
           </div>
-        )}
+        ))}
       </div>
 
     </main>
