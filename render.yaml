@@ -1,0 +1,48 @@
+# Render blueprint — one web service that builds the app and serves it from
+# the same Express process that holds the Gemini key.
+#
+# Deploy: Render dashboard > New > Blueprint > pick this repo.
+# Every value marked sync:false must be pasted into the Render dashboard by
+# hand; nothing secret belongs in this file.
+services:
+  - type: web
+    name: liquid
+    runtime: node
+    plan: free
+    # The free plan sleeps after inactivity; the first request wakes it (~30s).
+    # --include=dev matters: Render sets NODE_ENV=production, and both the
+    # build (vite) and the start command (tsx) live in devDependencies.
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/ai/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+
+      # ---- Server-side secrets: set these in the Render dashboard ----
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+      # Comma-separated emails allowed to sign in. Leave unset and anyone with
+      # a Google account can create an account and spend your Gemini quota.
+      - key: ALLOWED_EMAILS
+        sync: false
+
+      - key: AI_MONTHLY_CAP
+        value: "50"
+
+      # ---- Public, baked into the bundle at build time ----
+      # These are read by Vite during buildCommand, so they must exist as
+      # environment variables on the service, not just at runtime.
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+      - key: VITE_CLOUDINARY_CLOUD_NAME
+        sync: false

@@ -166,6 +166,60 @@ and every save also uploads to a remote archive. Google Drive is the obvious can
 needs a Google Cloud client ID and consent screen of your own — the hook is ready when
 you have one.
 
+## Accounts and sync
+
+Optional. With no Supabase keys in `.env`, the app behaves exactly as it always
+did: one browser, no account, no network. Add the keys and a sign-in screen
+appears, with **Use this device only** still there for anyone who wants the old
+behaviour.
+
+- **Who sees what** is enforced by Postgres, not by the frontend. Every table
+  carries a `user_id` and one policy: `auth.uid() = user_id`. A bug in the app
+  cannot show one account another's rent.
+- **Nothing that can drift is stored.** A period's `received` and a loan's
+  `repaid` are summed from the ledger entries tagged with their id, so two
+  devices that were offline together merge by appending rows. The worst case is
+  a duplicate entry you can see and delete, never a silently wrong total.
+- **Offline writes queue** in `localStorage` and replay on reconnect. The header
+  badge says which state you are in: Saved locally, Syncing, Synced, Offline
+  with a count, or Sync failed.
+
+Setup, once:
+
+1. Create a Supabase project. Run `supabase/schema.sql` in its SQL editor.
+2. Authentication > Providers > Google: enable it, paste a Google OAuth client
+   ID and secret whose redirect URI is
+   `https://<project>.supabase.co/auth/v1/callback`.
+3. Authentication > URL Configuration: set Site URL and add a redirect URL for
+   wherever the app runs.
+4. Fill `.env` from `.env.example`.
+
+## Deploying
+
+The Express server in `server.ts` serves the built app *and* holds the Gemini
+key, so one Render web service covers both. `render.yaml` is the blueprint:
+Render > New > Blueprint > pick the repo, then paste the environment variables
+it asks for.
+
+Two things that bite:
+
+- `VITE_*` values are baked in at build time, so they must exist as environment
+  variables on the service, not only at runtime.
+- Render sets `NODE_ENV=production`, which makes plain `npm ci` skip
+  devDependencies — and both `vite` (build) and `tsx` (start) live there. The
+  blueprint uses `npm ci --include=dev` for that reason.
+
+After the first deploy, add the new https origin to Google (Authorized
+JavaScript origins) and to Supabase (Site URL plus redirect URLs). Then open it
+on a phone and Add to Home Screen: an https origin is also what the service
+worker and PWA install need, which is why a `http://192.168.x.x` LAN address
+cannot do the job.
+
+Who can sign in is controlled by `ALLOWED_EMAILS` — a comma-separated list.
+Leave it empty and anyone with a Google account can create one and spend your
+Gemini quota. Funded AI actions per account per month come from
+`AI_MONTHLY_CAP`; past it, people are asked for their own key in Settings.
+
 ## Project layout
 
 ```
