@@ -202,9 +202,13 @@ const toNumber = (value: unknown, fallback = 0): number => {
 const toText = (value: unknown, fallback = ''): string =>
   typeof value === 'string' && value.trim() ? value.trim() : fallback;
 
-function safeCategory(value: unknown, fallback: Category): Category {
+/** Accepts anything the caller offered the model, plus the built-ins. */
+function safeCategory(value: unknown, fallback: Category, allowed?: string[]): Category {
   const text = toText(value);
-  return (EXPENSE_CATEGORY_LIST.includes(text) ? text : fallback) as Category;
+  if (!text) return fallback;
+  const list = allowed && allowed.length > 0 ? allowed : EXPENSE_CATEGORY_LIST;
+  const match = list.find((name) => name.toLowerCase() === text.toLowerCase());
+  return (match ?? fallback) as Category;
 }
 
 /** ISO dates only, and never in the future — a misread year is worse than today. */
@@ -217,9 +221,14 @@ function safeDate(value: unknown): string {
 export async function scanBill(
   imageBase64: string,
   mimeType: string,
-  settings: Settings
+  settings: Settings,
+  categories?: string[]
 ): Promise<ScannedBill> {
-  const raw = await callGemini('scan-bill', buildBillRequest(imageBase64, mimeType, settings.currency), settings);
+  const raw = await callGemini(
+    'scan-bill',
+    buildBillRequest(imageBase64, mimeType, settings.currency, categories),
+    settings
+  );
 
   const items: LineItem[] = Array.isArray(raw.items)
     ? (raw.items as Record<string, unknown>[])
@@ -241,7 +250,7 @@ export async function scanBill(
     total: total || itemsTotal,
     tax: Math.max(0, toNumber(raw.tax)),
     discount: Math.max(0, toNumber(raw.discount)),
-    category: safeCategory(raw.category, 'Groceries'),
+    category: safeCategory(raw.category, 'Groceries', categories),
     paymentMethod: toText(raw.paymentMethod, 'UPI'),
     note: toText(raw.note),
     confidence: Math.min(1, Math.max(0, toNumber(raw.confidence, 0.5))),
@@ -254,8 +263,16 @@ export async function scanBill(
 
 export type DraftTransaction = Omit<Transaction, 'id'>;
 
-export async function parseQuickAdd(text: string, settings: Settings): Promise<DraftTransaction[]> {
-  const raw = await callGemini('quick-add', buildQuickAddRequest(text, todayISO(), settings.currency), settings);
+export async function parseQuickAdd(
+  text: string,
+  settings: Settings,
+  categories?: string[]
+): Promise<DraftTransaction[]> {
+  const raw = await callGemini(
+    'quick-add',
+    buildQuickAddRequest(text, todayISO(), settings.currency, categories),
+    settings
+  );
   const entries = Array.isArray(raw.entries) ? (raw.entries as Record<string, unknown>[]) : [];
 
   return entries
@@ -265,7 +282,7 @@ export async function parseQuickAdd(text: string, settings: Settings): Promise<D
       if (!merchant || amount <= 0) return null;
 
       const incoming = toText(entry.direction) === 'in';
-      const category = incoming ? 'Other Income' : safeCategory(entry.category, 'Other');
+      const category = incoming ? 'Other Income' : safeCategory(entry.category, 'Other', categories);
       const rawType = toText(entry.type, 'discretionary');
       const type: Transaction['type'] = incoming
         ? 'income'

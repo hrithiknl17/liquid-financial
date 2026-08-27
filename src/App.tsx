@@ -679,8 +679,16 @@ export default function App({ session }: { session?: Session | null }) {
   /* ====================== SMART AGENT ====================== */
 
   const agentState: AgentState = useMemo(
-    () => ({ transactions, subscriptions, investments, incomeSources, loans: liveLoans, settings }),
-    [transactions, subscriptions, investments, incomeSources, liveLoans, settings]
+    () => ({
+      transactions,
+      subscriptions,
+      investments,
+      incomeSources,
+      loans: liveLoans,
+      categories,
+      settings,
+    }),
+    [transactions, subscriptions, investments, incomeSources, liveLoans, categories, settings]
   );
 
   /** Turns one confirmed proposal into real state. Nothing here runs unasked. */
@@ -1046,6 +1054,7 @@ export default function App({ session }: { session?: Session | null }) {
 
       <QuickAddModal
         isOpen={isQuickAddOpen}
+        categories={categories}
         onClose={() => setIsQuickAddOpen(false)}
         settings={settings}
         suggestions={quickSuggestions}

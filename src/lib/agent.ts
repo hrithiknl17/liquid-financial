@@ -1,4 +1,5 @@
 import {
+  CustomCategory,
   IncomeSource,
   Investment,
   Loan,
@@ -11,6 +12,7 @@ import { money } from './format';
 import { outstandingLoan } from './loans';
 import { callGemini } from './ai';
 import { buildAgentRequest } from './prompts';
+import { categoryNames } from './categories';
 
 export interface AgentState {
   transactions: Transaction[];
@@ -18,6 +20,8 @@ export interface AgentState {
   investments: Investment[];
   incomeSources: IncomeSource[];
   loans: Loan[];
+  /** Offered to the model so it can file entries under your own categories. */
+  categories: CustomCategory[];
   settings: Settings;
 }
 
@@ -183,7 +187,9 @@ export async function runAgent(history: ChatTurn[], state: AgentState): Promise<
     history,
     buildContext(state),
     todayISO(),
-    state.settings.currency
+    state.settings.currency,
+    // Both kinds: the agent logs income as readily as spending.
+    [...categoryNames('expense', state.categories), ...categoryNames('income', state.categories)]
   );
 
   const payload = await callGemini('agent', request, state.settings, { raw: true });

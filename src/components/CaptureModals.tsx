@@ -107,7 +107,7 @@ export const ScanBillModal: React.FC<ScanBillModalProps> = ({
 
         const dataUrl = await fileToDataUrl(compressed);
         const { mimeType, base64 } = splitDataUrl(dataUrl);
-        const result = await scanBill(base64, mimeType, settings);
+        const result = await scanBill(base64, mimeType, settings, categoryNames('expense', categories));
 
         setScan(result);
         setMerchant(result.merchant);
@@ -468,6 +468,7 @@ interface QuickAddModalProps {
   isOpen: boolean;
   onClose: () => void;
   settings: Settings;
+  categories: CustomCategory[];
   suggestions: Draft[];
   onAddMany: (entries: Draft[]) => void;
 }
@@ -476,6 +477,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   isOpen,
   onClose,
   settings,
+  categories,
   suggestions,
   onAddMany,
 }) => {
@@ -499,7 +501,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
     setNotice(null);
 
     try {
-      const parsed = await parseQuickAdd(input, settings);
+      const parsed = await parseQuickAdd(input, settings, categoryNames('expense', categories));
       if (parsed.length === 0) throw new Error('empty');
       setDrafts(parsed);
     } catch (err) {

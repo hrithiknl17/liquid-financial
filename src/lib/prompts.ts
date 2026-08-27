@@ -43,7 +43,7 @@ export const EXPENSE_CATEGORY_LIST = [
 
 export const PAYMENT_METHODS = ['UPI', 'Debit card', 'Credit card', 'Cash', 'Bank transfer', 'Wallet', 'Other'];
 
-const BILL_SCHEMA = {
+const billSchema = (categories?: string[]) => ({
   type: 'OBJECT',
   properties: {
     merchant: { type: 'STRING', description: 'Store or biller name as printed' },
@@ -52,7 +52,7 @@ const BILL_SCHEMA = {
     tax: { type: 'NUMBER', description: 'Total tax/GST if printed, else 0' },
     discount: { type: 'NUMBER', description: 'Total discount/savings if printed, else 0' },
     currency: { type: 'STRING', description: 'ISO code such as INR or USD if determinable, else empty' },
-    category: { type: 'STRING', enum: EXPENSE_CATEGORY_LIST },
+    category: { type: 'STRING', enum: categoryEnum(categories) },
     paymentMethod: { type: 'STRING', enum: PAYMENT_METHODS },
     note: { type: 'STRING', description: 'Short useful note, e.g. bill number or branch. Keep under 80 chars.' },
     confidence: { type: 'NUMBER', description: '0 to 1, how sure you are the totals are right' },
@@ -70,7 +70,7 @@ const BILL_SCHEMA = {
     },
   },
   required: ['merchant', 'total', 'category', 'items', 'confidence'],
-};
+});
 
 const BILL_INSTRUCTIONS = `You read photographed receipts and bills and turn them into structured data.
 
@@ -85,7 +85,22 @@ Rules:
 - If a value is genuinely not on the bill, use 0 or an empty string. Never invent one.
 - Set confidence below 0.6 if the image is blurred, cropped, or the item lines are unreadable.`;
 
-export function buildBillRequest(imageBase64: string, mimeType: string, currencyHint?: string) {
+/**
+ * The categories a model may choose from. Defaults to the built-ins, but the
+ * caller passes the merged list so a bill can be filed under a category
+ * someone invented this morning.
+ */
+function categoryEnum(categories?: string[]): string[] {
+  const list = (categories ?? []).map((name) => name.trim()).filter(Boolean);
+  return list.length > 0 ? list : EXPENSE_CATEGORY_LIST;
+}
+
+export function buildBillRequest(
+  imageBase64: string,
+  mimeType: string,
+  currencyHint?: string,
+  categories?: string[]
+) {
   return {
     contents: [
       {
@@ -103,12 +118,12 @@ export function buildBillRequest(imageBase64: string, mimeType: string, currency
     generationConfig: {
       temperature: 0,
       responseMimeType: 'application/json',
-      responseSchema: BILL_SCHEMA,
+      responseSchema: billSchema(categories),
     },
   };
 }
 
-const QUICK_ADD_SCHEMA = {
+const quickAddSchema = (categories?: string[]) => ({
   type: 'OBJECT',
   properties: {
     entries: {
@@ -119,7 +134,7 @@ const QUICK_ADD_SCHEMA = {
           merchant: { type: 'STRING' },
           amount: { type: 'NUMBER', description: 'Positive magnitude; direction goes in `direction`' },
           direction: { type: 'STRING', enum: ['out', 'in'] },
-          category: { type: 'STRING', enum: EXPENSE_CATEGORY_LIST },
+          category: { type: 'STRING', enum: categoryEnum(categories) },
           type: { type: 'STRING', enum: ['discretionary', 'fixed', 'income'] },
           dayOffset: {
             type: 'NUMBER',
@@ -132,7 +147,7 @@ const QUICK_ADD_SCHEMA = {
     },
   },
   required: ['entries'],
-};
+});
 
 const QUICK_ADD_INSTRUCTIONS = `You turn a person's shorthand notes about their day's spending into ledger entries.
 
@@ -146,7 +161,12 @@ Rules:
 - Guess the merchant from the words given. If only a thing is named ("chai"), use that as the merchant.
 - Return an empty entries array if there is no spending in the text.`;
 
-export function buildQuickAddRequest(text: string, todayISO: string, currencyHint?: string) {
+export function buildQuickAddRequest(
+  text: string,
+  todayISO: string,
+  currencyHint?: string,
+  categories?: string[]
+) {
   return {
     contents: [
       {
@@ -163,7 +183,7 @@ export function buildQuickAddRequest(text: string, todayISO: string, currencyHin
     generationConfig: {
       temperature: 0,
       responseMimeType: 'application/json',
-      responseSchema: QUICK_ADD_SCHEMA,
+      responseSchema: quickAddSchema(categories),
     },
   };
 }
@@ -179,7 +199,7 @@ const N = 'NUMBER';
  * Tools the chat agent may call. Anything that writes is staged for the user
  * to confirm — the model proposes, the person approves, the app applies.
  */
-export const AGENT_TOOLS = [
+export const agentTools = (categories?: string[]) => [
   {
     name: 'add_transaction',
     description: 'Record money spent or received in the ledger.',
@@ -189,7 +209,7 @@ export const AGENT_TOOLS = [
         merchant: { type: S, description: 'Who it was paid to, or the source of income' },
         amount: { type: N, description: 'Positive magnitude. Decimals allowed, e.g. 0.5 for fifty paise.' },
         direction: { type: S, enum: ['out', 'in'] },
-        category: { type: S, enum: EXPENSE_CATEGORY_LIST },
+        category: { type: S, enum: categoryEnum(categories) },
         type: { type: S, enum: ['discretionary', 'fixed', 'income'] },
         dayOffset: { type: N, description: '0 today, -1 yesterday. Never positive.' },
         paymentMethod: { type: S, enum: PAYMENT_METHODS },
@@ -360,7 +380,8 @@ export function buildAgentRequest(
   history: { role: 'user' | 'model'; text: string }[],
   contextBlock: string,
   todayISO: string,
-  currency: string
+  currency: string,
+  categories?: string[]
 ) {
   return {
     systemInstruction: {
@@ -371,7 +392,7 @@ export function buildAgentRequest(
       ],
     },
     contents: history.map((turn) => ({ role: turn.role, parts: [{ text: turn.text }] })),
-    tools: [{ functionDeclarations: AGENT_TOOLS }],
+    tools: [{ functionDeclarations: agentTools(categories) }],
     generationConfig: { temperature: 0 },
   };
 }
