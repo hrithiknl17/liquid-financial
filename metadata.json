@@ -1,0 +1,6 @@
+{
+  "name": "Liquid Finance Tracker",
+  "description": "A personal finance tracker for spending and groceries, subscriptions and recharges, and an investment portfolio. Hub, Ledger, Vault and Invest views, with every figure derived from your own ledger and stored on-device.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

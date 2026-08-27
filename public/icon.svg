@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="112" fill="#fcfcfc"/>
+  <rect x="24" y="24" width="464" height="464" rx="92" fill="#ffffff" stroke="#0f172a" stroke-width="24"/>
+  <rect x="96" y="96" width="320" height="320" rx="64" fill="#4f46e5"/>
+  <text x="256" y="256" font-family="Plus Jakarta Sans, Inter, Segoe UI, sans-serif" font-size="220" font-weight="800" fill="#ffffff" text-anchor="middle" dominant-baseline="central">L</text>
+</svg>
