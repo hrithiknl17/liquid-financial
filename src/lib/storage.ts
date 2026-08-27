@@ -45,6 +45,7 @@ export const KEYS = {
   loans: 'loans',
   chat: 'agent_chat',
   countersMigrated: 'counters_migrated',
+  categories: 'categories',
   localOnly: 'local_only',
   pendingWrites: 'pending_writes',
 } as const;

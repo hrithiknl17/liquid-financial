@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Category, EXPENSE_CATEGORIES, LineItem, Settings, Transaction } from '../types';
+import { Category, CustomCategory, LineItem, Settings, Transaction } from '../types';
 import { CURRENCY_SYMBOL, money } from '../lib/format';
 import { displayDate, todayISO } from '../lib/dates';
-import { iconForCategory } from '../lib/finance';
+import { categoryNames, iconFor } from '../lib/categories';
 import { uid } from '../lib/storage';
 import {
   AiUnavailableError,
@@ -25,6 +25,7 @@ interface ScanBillModalProps {
   isOpen: boolean;
   onClose: () => void;
   settings: Settings;
+  categories: CustomCategory[];
   /** A file handed over by the PWA share target, if the app was opened that way. */
   incomingFile?: File | null;
   onAddTransaction: (tx: Draft) => void;
@@ -37,6 +38,7 @@ export const ScanBillModal: React.FC<ScanBillModalProps> = ({
   isOpen,
   onClose,
   settings,
+  categories,
   incomingFile,
   onAddTransaction,
   onOpenSettings,
@@ -163,7 +165,7 @@ export const ScanBillModal: React.FC<ScanBillModalProps> = ({
       category,
       date,
       amount: -value,
-      iconName: iconForCategory(category),
+      iconName: iconFor(category, categories),
       type: 'discretionary',
       note: note.trim() || undefined,
       paymentMethod,
@@ -360,7 +362,7 @@ export const ScanBillModal: React.FC<ScanBillModalProps> = ({
                   onChange={(e) => setCategory(e.target.value as Category)}
                   className={inputClass}
                 >
-                  {EXPENSE_CATEGORIES.map((c) => (
+                  {categoryNames('expense', categories).map((c) => (
                     <option key={c} value={c}>
                       {c}
                     </option>

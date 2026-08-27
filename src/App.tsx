@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Session } from '@supabase/supabase-js';
 import {
   Brief,
+  CustomCategory,
   IncomeDue,
   IncomeSource,
   Investment,
@@ -16,6 +17,7 @@ import { DEFAULT_SETTINGS, buildDemoData } from './data/initialData';
 import { KEYS, clearAll, load, save, uid } from './lib/storage';
 import { addDays, addMonths, currentMonthKey, daysUntil, rollRenewal, todayISO } from './lib/dates';
 import { iconForCategory, summarize } from './lib/finance';
+import { iconFor } from './lib/categories';
 import {
   buildBrief,
   buildSignals,
@@ -50,6 +52,7 @@ import { InvestScreen } from './components/InvestScreen';
 import { IncomeScreen } from './components/IncomeScreen';
 import { CollectModal, LoanModal, SettleLoanModal, SourceModal } from './components/IncomeModals';
 import { AgentModal } from './components/AgentModal';
+import { CategoryModal } from './components/CategoryModal';
 import {
   AddInvestmentModal,
   AddSubscriptionModal,
@@ -87,6 +90,9 @@ export default function App({ session }: { session?: Session | null }) {
   const [incomeDues, setIncomeDues] = useState<IncomeDue[]>(() => load<IncomeDue[]>(KEYS.incomeDues, []));
   const [loans, setLoans] = useState<Loan[]>(() => load<Loan[]>(KEYS.loans, []));
   const [chat, setChat] = useState<ChatTurn[]>(() => load<ChatTurn[]>(KEYS.chat, []));
+  const [categories, setCategories] = useState<CustomCategory[]>(() =>
+    load<CustomCategory[]>(KEYS.categories, [])
+  );
 
   // Which month the Ledger and Hub headline numbers describe.
   const [activeMonth, setActiveMonth] = useState<string>(currentMonthKey());
@@ -108,6 +114,7 @@ export default function App({ session }: { session?: Session | null }) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isAgentOpen, setIsAgentOpen] = useState(false);
+  const [isCategoriesOpen, setIsCategoriesOpen] = useState(false);
   const [isSourceOpen, setIsSourceOpen] = useState(false);
   const [editingSource, setEditingSource] = useState<IncomeSource | null>(null);
   const [collecting, setCollecting] = useState<DueView | null>(null);
@@ -152,6 +159,7 @@ export default function App({ session }: { session?: Session | null }) {
   useEffect(() => save(KEYS.incomeDues, incomeDues), [incomeDues]);
   useEffect(() => save(KEYS.loans, loans), [loans]);
   useEffect(() => save(KEYS.chat, chat), [chat]);
+  useEffect(() => save(KEYS.categories, categories), [categories]);
 
   /**
    * Materialise the periods every source owes, and roll arrears forward. Runs
@@ -512,6 +520,36 @@ export default function App({ session }: { session?: Session | null }) {
     });
   };
 
+  /* ====================== CATEGORIES ====================== */
+
+  const handleAddCategory = (data: Omit<CustomCategory, 'id'>) => {
+    setCategories((prev) => [...prev, { ...data, id: uid('cat') }]);
+    showToast(`${data.name} added`);
+  };
+
+  const handleUpdateCategory = (updated: CustomCategory) => {
+    const previous = categories.find((entry) => entry.id === updated.id);
+    setCategories((prev) => prev.map((entry) => (entry.id === updated.id ? updated : entry)));
+
+    // A rename has to follow the transactions filed under the old name, or
+    // they end up orphaned under a category nothing offers any more.
+    if (previous && previous.name !== updated.name) {
+      setTransactions((prev) =>
+        prev.map((tx) =>
+          tx.category === previous.name
+            ? { ...tx, category: updated.name, iconName: updated.iconName }
+            : tx
+        )
+      );
+    }
+    showToast(`${updated.name} updated`);
+  };
+
+  const handleDeleteCategory = (id: string) => {
+    setCategories((prev) => prev.filter((entry) => entry.id !== id));
+    showToast('Category removed');
+  };
+
   /* ===================== INCOME SOURCES ===================== */
 
   const handleAddSource = (data: Omit<IncomeSource, 'id'>) => {
@@ -663,7 +701,7 @@ export default function App({ session }: { session?: Session | null }) {
           category,
           date: dateAt(),
           amount: out ? -Math.abs(num('amount')) : Math.abs(num('amount')),
-          iconName: iconForCategory(category),
+          iconName: iconFor(category, categories),
           type: (str('type') || (out ? 'discretionary' : 'income')) as Transaction['type'],
           paymentMethod: args.paymentMethod === undefined ? undefined : str('paymentMethod'),
           note: args.note === undefined ? undefined : str('note'),
@@ -979,11 +1017,23 @@ export default function App({ session }: { session?: Session | null }) {
         isOpen={isAddTxOpen}
         onClose={() => setIsAddTxOpen(false)}
         settings={settings}
+        categories={categories}
         onAddTransaction={handleAddTransaction}
+      />
+
+      <CategoryModal
+        isOpen={isCategoriesOpen}
+        onClose={() => setIsCategoriesOpen(false)}
+        custom={categories}
+        transactions={transactions}
+        onAdd={handleAddCategory}
+        onUpdate={handleUpdateCategory}
+        onDelete={handleDeleteCategory}
       />
 
       <ScanBillModal
         isOpen={isScanOpen}
+        categories={categories}
         onClose={() => {
           setIsScanOpen(false);
           setSharedFile(null);
@@ -1048,6 +1098,7 @@ export default function App({ session }: { session?: Session | null }) {
       <TransactionDetailModal
         transaction={selectedTx}
         settings={settings}
+        categories={categories}
         onClose={() => setSelectedTx(null)}
         onUpdate={handleUpdateTransaction}
         onDelete={handleDeleteTransaction}
@@ -1139,6 +1190,10 @@ export default function App({ session }: { session?: Session | null }) {
         incomeSources={incomeSources}
         incomeDues={incomeDues}
         loans={liveLoans}
+        onOpenCategories={() => {
+          setIsProfileOpen(false);
+          setIsCategoriesOpen(true);
+        }}
         onLoadDemo={handleLoadDemo}
         onResetData={handleResetData}
         onImport={handleImport}

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   Category,
+  CustomCategory,
   EXPENSE_CATEGORIES,
   INCOME_CATEGORIES,
   Investment,
@@ -12,6 +13,7 @@ import { CURRENCY_SYMBOL, money, percent } from '../lib/format';
 import { addMonths, cycleProgress, daysUntil, displayDate, todayISO } from '../lib/dates';
 import { holdingCost, holdingValue, holdingReturn, isPendingIpo, monthlyCost } from '../lib/finance';
 import { getReceiptUrl } from '../lib/receipts';
+import { categoryNames, iconFor } from '../lib/categories';
 import { BrandTile, Label, ModalShell, ghostButtonClass, inputClass, primaryButtonClass } from './ui';
 
 const DetailRow: React.FC<{ label: string; children: React.ReactNode; tone?: string }> = ({
@@ -30,10 +32,11 @@ const DetailRow: React.FC<{ label: string; children: React.ReactNode; tone?: str
 export const TransactionDetailModal: React.FC<{
   transaction: Transaction | null;
   settings: Settings;
+  categories: CustomCategory[];
   onClose: () => void;
   onUpdate: (tx: Transaction) => void;
   onDelete: (id: string) => void;
-}> = ({ transaction, settings, onClose, onUpdate, onDelete }) => {
+}> = ({ transaction, settings, categories, onClose, onUpdate, onDelete }) => {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Transaction | null>(transaction);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -127,10 +130,14 @@ export const TransactionDetailModal: React.FC<{
             <Label>Category</Label>
             <select
               value={draft.category}
-              onChange={(e) => setDraft({ ...draft, category: e.target.value as Category })}
+              onChange={(e) => {
+                const category = e.target.value as Category;
+                // Keep the icon in step with the category, custom ones included.
+                setDraft({ ...draft, category, iconName: iconFor(category, categories) });
+              }}
               className={inputClass}
             >
-              {(draft.type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES).map((c) => (
+              {categoryNames(draft.type === 'income' ? 'income' : 'expense', categories).map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>

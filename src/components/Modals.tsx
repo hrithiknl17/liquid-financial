@@ -3,6 +3,7 @@ import {
   ASSET_CLASSES,
   AssetClass,
   Category,
+  CustomCategory,
   EXPENSE_CATEGORIES,
   INCOME_CATEGORIES,
   Investment,
@@ -14,7 +15,8 @@ import {
 } from '../types';
 import { CURRENCY_SYMBOL, compactMoney, money } from '../lib/format';
 import { addMonths, displayDate, todayISO } from '../lib/dates';
-import { holdingValue, iconForCategory } from '../lib/finance';
+import { holdingValue } from '../lib/finance';
+import { categoryNames, iconFor } from '../lib/categories';
 import { uid } from '../lib/storage';
 import {
   BrandTile,
@@ -29,6 +31,7 @@ import {
 /* ======================== ADD TRANSACTION ======================== */
 
 interface AddTransactionModalProps {
+  categories: CustomCategory[];
   isOpen: boolean;
   onClose: () => void;
   settings: Settings;
@@ -41,6 +44,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   isOpen,
   onClose,
   settings,
+  categories,
   onAddTransaction,
 }) => {
   const [type, setType] = useState<EntryType>('discretionary');
@@ -88,7 +92,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       category,
       date,
       amount: type === 'income' ? Math.abs(value) : -Math.abs(value),
-      iconName: iconForCategory(category),
+      iconName: iconFor(category, categories),
       type,
       note: note.trim() || undefined,
       paymentMethod: paymentMethod || undefined,
@@ -97,7 +101,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     onClose();
   };
 
-  const categoryOptions: readonly string[] = type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+  const categoryOptions = categoryNames(type === 'income' ? 'income' : 'expense', categories);
 
   return (
     <ModalShell isOpen={isOpen} onClose={onClose} title="New Transaction" icon="add" iconBg="bg-[#e0f2fe]">

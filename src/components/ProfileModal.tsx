@@ -33,6 +33,7 @@ interface ProfileModalProps {
   incomeSources: IncomeSource[];
   incomeDues: IncomeDue[];
   loans: Loan[];
+  onOpenCategories: () => void;
   onLoadDemo: () => void;
   onResetData: () => void;
   onImport: (payload: {
@@ -60,6 +61,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   incomeSources,
   incomeDues,
   loans,
+  onOpenCategories,
   onLoadDemo,
   onResetData,
   onImport,
@@ -361,6 +363,19 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       </div>
 
       <div className="space-y-2.5">
+        <button
+          onClick={onOpenCategories}
+          className="w-full flex items-center justify-between px-4 py-3 bg-white border-2 border-slate-900 rounded-2xl shadow-[3px_3px_0px_0px_#0f172a] hover:bg-slate-50 active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all cursor-pointer"
+        >
+          <span className="flex items-center gap-2.5">
+            <span className="material-symbols-outlined text-[20px] text-slate-700">sell</span>
+            <span className="text-xs font-black uppercase tracking-wider text-slate-900">Categories</span>
+          </span>
+          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+            Add your own
+          </span>
+        </button>
+
         <div className="flex gap-2.5">
           <button onClick={() => void handleExport()} className={`flex-1 ${ghostButtonClass}`}>
             Export backup

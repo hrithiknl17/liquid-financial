@@ -20,7 +20,22 @@ export const INCOME_CATEGORIES = ['Salary', 'Freelance', 'Refund', 'Dividend', '
 
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 export type IncomeCategory = (typeof INCOME_CATEGORIES)[number];
-export type Category = ExpenseCategory | IncomeCategory;
+
+/**
+ * A category is just a name. The lists above are the ones that ship, but
+ * anyone can add their own, so this cannot be a closed union — a transaction
+ * filed under "Tuition" is as valid as one under "Groceries".
+ */
+export type Category = string;
+
+/** A category someone added themselves. */
+export interface CustomCategory {
+  id: string;
+  name: string;
+  kind: 'expense' | 'income';
+  /** Material symbol name, chosen from the picker. */
+  iconName: string;
+}
 
 /** A single line on a grocery/shopping bill. */
 export interface LineItem {
