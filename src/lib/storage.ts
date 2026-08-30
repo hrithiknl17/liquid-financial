@@ -47,6 +47,7 @@ export const KEYS = {
   countersMigrated: 'counters_migrated',
   categories: 'categories',
   localOnly: 'local_only',
+  demo: 'demo',
   pendingWrites: 'pending_writes',
 } as const;
 

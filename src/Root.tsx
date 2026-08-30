@@ -3,7 +3,7 @@ import App from './App';
 import { SignInScreen } from './components/SignInScreen';
 import { PendingApproval } from './components/PendingApproval';
 import { AccessState, fetchAccess, signOut } from './lib/cloud';
-import { KEYS, load, save } from './lib/storage';
+import { KEYS, clearAll, load, save } from './lib/storage';
 import { buildDemoData } from './data/initialData';
 import { useSession } from './lib/useSession';
 
@@ -12,8 +12,9 @@ import { useSession } from './lib/useSession';
  * keeps that decision out of App — which owns enough already.
  */
 export default function Root() {
-  const { status, session, stayLocal } = useSession();
+  const { status, session, stayLocal, leaveLocal } = useSession();
   const [access, setAccess] = useState<AccessState | null>(null);
+  const [demoSeeded, setDemoSeeded] = useState<boolean>(() => load<boolean>(KEYS.demo, false));
 
   /**
    * An account exists the moment someone signs in, but it may not be allowed
@@ -38,7 +39,29 @@ export default function Root() {
     save(KEYS.subscriptions, demo.subscriptions);
     save(KEYS.investments, demo.investments);
     save(KEYS.settings, demo.settings);
+    // Remembering that this browser is *only* looking around is what makes the
+    // way back out possible: without it the sample is indistinguishable from
+    // someone's real device-only ledger, and there is nothing safe to erase.
+    save(KEYS.demo, true);
+    setDemoSeeded(true);
     stayLocal();
+  };
+
+  // The sample belongs to nobody, so leaving it wipes this browser and returns
+  // to the front door — no fake rows survive to be adopted by a real account.
+  const exitDemo = () => {
+    clearAll(Object.values(KEYS));
+    window.location.reload();
+  };
+
+  /**
+   * Leaves device-only mode with the data intact. The sign-in screen comes
+   * back, so someone who chose "this device only" can still get an account
+   * later and bring what they already typed with them.
+   */
+  const exitLocal = () => {
+    leaveLocal();
+    window.location.reload();
   };
 
   if (status === 'loading') {
@@ -90,11 +113,21 @@ export default function Root() {
   // this browser, App is handed nothing, so nothing syncs.
   const activeSession = status === 'signed-in' ? session : null;
 
+  // The flag outlives local-only mode in storage, so the sample banner is only
+  // true while this browser is actually still running on the sample.
+  const inDemo = demoSeeded && status === 'local-only';
+
   // Keying the subtree on the account id remounts App on a switch, so no data
   // from the previous account can survive in component state.
   return (
     <Fragment key={activeSession?.user.id ?? 'local'}>
-      <App session={activeSession} isAdmin={Boolean(access?.admin)} />
+      <App
+        session={activeSession}
+        isAdmin={Boolean(access?.admin)}
+        isDemo={inDemo}
+        onExitDemo={exitDemo}
+        onExitLocal={exitLocal}
+      />
     </Fragment>
   );
 }

@@ -9,6 +9,10 @@ interface HeaderProps {
   onOpenProfile: () => void;
   onOpenAgent: () => void;
   sync: SyncStatus;
+  /** True while this browser is running on the sample ledger. */
+  isDemo?: boolean;
+  /** Asks to leave the sample. Only called when `isDemo`. */
+  onExitDemo?: () => void;
 }
 
 export const TABS: { id: NavTab; label: string; icon: string }[] = [
@@ -26,6 +30,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenProfile,
   onOpenAgent,
   sync,
+  isDemo = false,
+  onExitDemo,
 }) => {
   // One badge, four truths: local-only, talking to the cloud, up to date, or
   // holding writes until the network comes back.
@@ -80,13 +86,31 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         <div className="flex items-center gap-3 md:gap-4">
-          <div
-            className={`hidden sm:flex items-center gap-2 ${badge.tone} border-2 border-slate-900 px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider text-slate-800 shadow-[2px_2px_0px_0px_#0f172a]`}
-            title={sync.message ?? undefined}
-          >
-            <span className={`w-2 h-2 rounded-full ${badge.dot}`}></span>
-            <span>{badge.label}</span>
-          </div>
+          {/* The way out of the sample has to be on screen, not buried in a
+              menu: someone looking around must never feel locked in. */}
+          {isDemo ? (
+            <button
+              onClick={onExitDemo}
+              id="exit-demo-button"
+              title="Leave the sample data and go back to sign in"
+              className="flex items-center gap-2 bg-amber-50 border-2 border-slate-900 pl-3 pr-2 py-1 rounded-full text-[11px] font-black uppercase tracking-wider text-slate-800 shadow-[2px_2px_0px_0px_#0f172a] hover:bg-amber-100 active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all cursor-pointer"
+            >
+              <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+              <span className="hidden sm:inline">Sample data</span>
+              <span className="flex items-center gap-0.5 text-indigo-700">
+                <span className="material-symbols-outlined text-[16px] font-bold">logout</span>
+                Exit
+              </span>
+            </button>
+          ) : (
+            <div
+              className={`hidden sm:flex items-center gap-2 ${badge.tone} border-2 border-slate-900 px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider text-slate-800 shadow-[2px_2px_0px_0px_#0f172a]`}
+              title={sync.message ?? undefined}
+            >
+              <span className={`w-2 h-2 rounded-full ${badge.dot}`}></span>
+              <span>{badge.label}</span>
+            </div>
+          )}
 
           <button
             onClick={onOpenAgent}

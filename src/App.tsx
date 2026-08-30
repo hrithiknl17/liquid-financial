@@ -70,13 +70,21 @@ import {
 import { ProfileModal } from './components/ProfileModal';
 import { QuickAddModal, ScanBillModal } from './components/CaptureModals';
 import { BriefBanner, CaptureDial, SignalsSection } from './components/Signals';
+import { ModalShell, ghostButtonClass } from './components/ui';
 
 export default function App({
   session,
   isAdmin = false,
+  isDemo = false,
+  onExitDemo,
+  onExitLocal,
 }: {
   session?: Session | null;
   isAdmin?: boolean;
+  /** True while this browser is running on the seeded sample ledger. */
+  isDemo?: boolean;
+  onExitDemo?: () => void;
+  onExitLocal?: () => void;
 }) {
   // The account this browser is writing as. `null` means local-only mode.
   const userId = session?.user.id ?? null;
@@ -124,6 +132,7 @@ export default function App({
   const [isAgentOpen, setIsAgentOpen] = useState(false);
   const [isCategoriesOpen, setIsCategoriesOpen] = useState(false);
   const [isAccessOpen, setIsAccessOpen] = useState(false);
+  const [isExitDemoOpen, setIsExitDemoOpen] = useState(false);
   const [isSourceOpen, setIsSourceOpen] = useState(false);
   const [editingSource, setEditingSource] = useState<IncomeSource | null>(null);
   const [collecting, setCollecting] = useState<DueView | null>(null);
@@ -923,6 +932,8 @@ export default function App({
         onOpenProfile={() => setIsProfileOpen(true)}
         onOpenAgent={() => setIsAgentOpen(true)}
         sync={syncStatus}
+        isDemo={isDemo}
+        onExitDemo={() => setIsExitDemoOpen(true)}
       />
 
       <div className="flex-1">
@@ -1212,6 +1223,7 @@ export default function App({
         incomeDues={incomeDues}
         loans={liveLoans}
         accountEmail={session?.user.email ?? null}
+        isDemo={isDemo}
         isAdmin={isAdmin}
         onOpenAccess={() => {
           setIsProfileOpen(false);
@@ -1220,6 +1232,11 @@ export default function App({
         onSignOut={() => {
           void signOut().then(() => window.location.reload());
         }}
+        onExitDemo={() => {
+          setIsProfileOpen(false);
+          setIsExitDemoOpen(true);
+        }}
+        onExitLocal={() => onExitLocal?.()}
         onDeleteAccount={() => {
           void deleteAccount()
             .then(() => {
@@ -1236,6 +1253,34 @@ export default function App({
         onResetData={handleResetData}
         onImport={handleImport}
       />
+
+      <ModalShell
+        isOpen={isExitDemoOpen}
+        onClose={() => setIsExitDemoOpen(false)}
+        title="Leave the sample"
+        icon="logout"
+        iconBg="bg-amber-50"
+      >
+        <p className="text-xs font-bold text-slate-600 leading-relaxed">
+          The sample ledger is erased from this browser and the sign-in screen comes back, so you can
+          continue with Google or start empty on this device. Nothing of yours is stored here yet.
+        </p>
+
+        <div className="flex gap-2.5 mt-6">
+          <button onClick={() => setIsExitDemoOpen(false)} className={`flex-1 ${ghostButtonClass}`}>
+            Stay in the sample
+          </button>
+          <button
+            onClick={() => {
+              setIsExitDemoOpen(false);
+              onExitDemo?.();
+            }}
+            className="flex-1 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xs font-black uppercase tracking-widest border-2 border-slate-900 shadow-[3px_3px_0px_0px_#4f46e5] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none transition-all cursor-pointer"
+          >
+            Exit sample
+          </button>
+        </div>
+      </ModalShell>
     </div>
   );
 }

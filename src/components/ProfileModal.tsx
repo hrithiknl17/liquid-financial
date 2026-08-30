@@ -34,11 +34,17 @@ interface ProfileModalProps {
   incomeDues: IncomeDue[];
   loans: Loan[];
   onOpenCategories: () => void;
-  /** Null in local-only mode, which hides the account controls entirely. */
+  /** Null in local-only mode: the account controls become a way back instead. */
   accountEmail: string | null;
+  /** True while this browser is running on the sample ledger. */
+  isDemo: boolean;
   isAdmin: boolean;
   onOpenAccess: () => void;
   onSignOut: () => void;
+  /** Leaves the sample: erases it from this browser and reopens sign in. */
+  onExitDemo: () => void;
+  /** Leaves device-only mode with the data kept, so an account can adopt it. */
+  onExitLocal: () => void;
   onDeleteAccount: () => void;
   onLoadDemo: () => void;
   onResetData: () => void;
@@ -69,9 +75,12 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   loans,
   onOpenCategories,
   accountEmail,
+  isDemo,
   isAdmin,
   onOpenAccess,
   onSignOut,
+  onExitDemo,
+  onExitLocal,
   onDeleteAccount,
   onLoadDemo,
   onResetData,
@@ -371,10 +380,36 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
         <div className="flex justify-between py-1.5">
           <span className="text-slate-400 uppercase tracking-wider">Storage</span>
           <span className="font-black text-emerald-600">
-            {accountEmail ? 'Synced to your account' : 'This device only'}
+            {accountEmail ? 'Synced to your account' : isDemo ? 'Sample data, this browser' : 'This device only'}
           </span>
         </div>
       </div>
+
+      {/* Signed out, there is still a decision to undo — the sample to leave, or
+          device-only mode to trade for an account. Without this the choice made
+          on the front door is permanent. */}
+      {!accountEmail && (
+        <div className="mb-5 p-4 bg-white border-2 border-slate-900 rounded-2xl shadow-[3px_3px_0px_0px_#0f172a]">
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+            {isDemo ? 'You are in the sample' : 'No account on this browser'}
+          </p>
+          <p className="text-xs font-bold text-slate-600 leading-relaxed mt-1 mb-3">
+            {isDemo
+              ? 'These numbers are made up. Leaving erases the sample from this browser and takes you back to sign in.'
+              : 'Everything lives in this browser only. Sign in to sync it to an account and keep it across devices — nothing is deleted.'}
+          </p>
+
+          {isDemo ? (
+            <button onClick={onExitDemo} className={`w-full ${ghostButtonClass}`}>
+              Exit sample &amp; sign in
+            </button>
+          ) : (
+            <button onClick={onExitLocal} className={`w-full ${ghostButtonClass}`}>
+              Sign in to sync this data
+            </button>
+          )}
+        </div>
+      )}
 
       {accountEmail && (
         <div className="mb-5 p-4 bg-white border-2 border-slate-900 rounded-2xl shadow-[3px_3px_0px_0px_#0f172a]">
