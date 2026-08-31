@@ -67,6 +67,12 @@ export interface ReceiptSync {
   name: string;
   upload(record: ReceiptRecord): Promise<string | null>;
   remove?(remoteId: string): Promise<void>;
+  /**
+   * Delivery URL for a receipt this device never stored, derived from the id
+   * alone. Without it a bill is invisible on every device but the one that
+   * took the photo.
+   */
+  resolve?(id: string): string | null;
 }
 
 let syncTarget: ReceiptSync | null = null;
@@ -104,10 +110,16 @@ export async function getReceipt(id: string): Promise<ReceiptRecord | null> {
   return (await tx<ReceiptRecord>('readonly', (store) => store.get(id))) ?? null;
 }
 
-/** Object URL for display. Callers must revoke it when the view closes. */
+/**
+ * URL for display. The local blob wins; failing that, the sync target's remote
+ * copy, which is what makes a bill visible on a second device or a fresh
+ * install. Only a `blob:` URL needs revoking, so callers must check the scheme
+ * before calling revokeObjectURL.
+ */
 export async function getReceiptUrl(id: string): Promise<string | null> {
   const record = await getReceipt(id);
-  return record ? URL.createObjectURL(record.blob) : null;
+  if (record) return URL.createObjectURL(record.blob);
+  return syncTarget?.resolve?.(id) ?? null;
 }
 
 export async function deleteReceipt(id: string): Promise<void> {

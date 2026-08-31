@@ -31,6 +31,21 @@ const SUPABASE_URL = process.env.VITE_SUPABASE_URL?.trim();
 const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
 const CLOUDINARY_KEY = process.env.CLOUDINARY_API_KEY?.trim();
 const CLOUDINARY_SECRET = process.env.CLOUDINARY_API_SECRET?.trim();
+// Deleting a bill needs the cloud name too. The VITE_ copy already exists for
+// the bundle, so fall back to it rather than making anyone set it twice.
+const CLOUDINARY_CLOUD = (process.env.CLOUDINARY_CLOUD_NAME ?? process.env.VITE_CLOUDINARY_CLOUD_NAME)?.trim();
+/**
+ * Cloudinary verifies signatures with SHA-1 unless the account has been
+ * switched to SHA-256 (Console > Settings > Security). Getting this wrong is
+ * the one failure that looks like a credential problem but is not, so it is a
+ * setting rather than a constant: an upload rejected as "Invalid Signature"
+ * is fixed by flipping this to sha1.
+ */
+const CLOUDINARY_SIGN_ALGO = (process.env.CLOUDINARY_SIGN_ALGO ?? 'sha256').trim().toLowerCase();
+
+function signCloudinary(params: string): string {
+  return crypto.createHash(CLOUDINARY_SIGN_ALGO).update(params + CLOUDINARY_SECRET).digest('hex');
+}
 
 /** Empty list means signups are open to anyone with a Google account. */
 const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS ?? '')
@@ -248,9 +263,61 @@ app.post('/api/uploads/sign', async (req: Request, res: Response) => {
   // Uploads are namespaced by account, so one person's folder is not another's.
   const folder = `liquid/${caller.id}`;
   const params = `folder=${folder}&public_id=${receiptId}&timestamp=${timestamp}`;
-  const signature = crypto.createHash('sha256').update(params + CLOUDINARY_SECRET).digest('hex');
+  const signature = signCloudinary(params);
 
   res.json({ signature, timestamp, folder, publicId: receiptId, apiKey: CLOUDINARY_KEY });
+});
+
+/**
+ * Removes one bill photo, so deleting a transaction does not leave its picture
+ * in the archive forever.
+ *
+ * Ownership is settled here and nowhere else: the public id must sit inside
+ * the caller's own folder, which the browser cannot talk its way around
+ * because the folder name comes from the verified token.
+ */
+app.post('/api/uploads/destroy', async (req: Request, res: Response) => {
+  if (!CLOUDINARY_KEY || !CLOUDINARY_SECRET || !CLOUDINARY_CLOUD) {
+    res.status(503).json({ error: 'Cloudinary credentials are not set on the server.' });
+    return;
+  }
+
+  const caller = await resolveCaller(req);
+  if (!caller) {
+    res.status(401).json({ error: 'Sign in to manage bill photos.' });
+    return;
+  }
+  if (!(await allowed(caller))) {
+    res.status(403).json({ error: 'This account is not on the allowlist yet.' });
+    return;
+  }
+
+  const publicId = String((req.body ?? {}).publicId ?? '');
+  const prefix = `liquid/${caller.id}/`;
+  if (!publicId.startsWith(prefix) || !/^[a-zA-Z0-9/_-]+$/.test(publicId)) {
+    res.status(403).json({ error: 'That bill does not belong to this account.' });
+    return;
+  }
+
+  const timestamp = Math.floor(Date.now() / 1000);
+  const params = `public_id=${publicId}&timestamp=${timestamp}`;
+  const body = new URLSearchParams({
+    public_id: publicId,
+    timestamp: String(timestamp),
+    api_key: CLOUDINARY_KEY,
+    signature: signCloudinary(params),
+  });
+
+  try {
+    const response = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/image/destroy`, {
+      method: 'POST',
+      body,
+      signal: AbortSignal.timeout(15_000),
+    });
+    res.status(response.ok ? 200 : 502).json(await response.json());
+  } catch {
+    res.status(502).json({ error: 'Cloudinary could not be reached.' });
+  }
 });
 
 // Static app, with SPA fallback so a refresh on any path still loads.

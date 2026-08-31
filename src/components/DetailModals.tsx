@@ -48,20 +48,24 @@ export const TransactionDetailModal: React.FC<{
     setConfirmDelete(false);
   }, [transaction]);
 
-  /** Pull the stored bill photo out of IndexedDB while this sheet is open. */
+  /**
+   * Show the bill while this sheet is open. It comes from IndexedDB when this
+   * device took the photo, and from the remote archive when it did not — a
+   * hosted URL owns no memory, so only the `blob:` case gets revoked.
+   */
   useEffect(() => {
-    let revoked: string | null = null;
+    let objectUrl: string | null = null;
     setReceiptUrl(null);
 
     if (transaction?.receiptId) {
       void getReceiptUrl(transaction.receiptId).then((url) => {
-        revoked = url;
+        if (url?.startsWith('blob:')) objectUrl = url;
         setReceiptUrl(url);
       });
     }
 
     return () => {
-      if (revoked) URL.revokeObjectURL(revoked);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [transaction?.receiptId]);
 

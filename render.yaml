@@ -29,6 +29,11 @@ services:
       - key: CLOUDINARY_API_SECRET
         sync: false
 
+      # sha256 unless Cloudinary rejects uploads as "Invalid Signature", which
+      # means the account still verifies with sha1.
+      - key: CLOUDINARY_SIGN_ALGO
+        value: "sha256"
+
       # Comma-separated emails allowed to sign in. Leave unset and anyone with
       # a Google account can create an account and spend your Gemini quota.
       - key: ALLOWED_EMAILS

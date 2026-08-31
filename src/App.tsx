@@ -32,7 +32,8 @@ import {
   registerBackgroundReminders,
   scheduleTodaysReminders,
 } from './lib/reminders';
-import { deleteReceipt } from './lib/receipts';
+import { deleteReceipt, registerReceiptSync } from './lib/receipts';
+import { createCloudinaryReceiptSync } from './lib/receiptCloud';
 import { DueView, paymentTransaction, periodLabel, reconcileDues, viewDues } from './lib/income';
 import {
   LoanView,
@@ -164,6 +165,17 @@ export default function App({
   }, []);
 
   const { status: syncStatus } = useCloudSync(userId, snapshot, handlePulled);
+
+  /**
+   * Bill photos follow the account, not the browser. Registering the archive
+   * here means a local-only session never uploads anything, and switching
+   * accounts re-points the target instead of leaking one person's folder into
+   * another's session.
+   */
+  useEffect(() => {
+    registerReceiptSync(userId ? createCloudinaryReceiptSync(userId) : null);
+    return () => registerReceiptSync(null);
+  }, [userId]);
 
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
