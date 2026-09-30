@@ -37,7 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
   // holding writes until the network comes back.
   const badge =
     sync.state === 'off'
-      ? { label: 'Saved locally', dot: 'bg-emerald-500', tone: 'bg-[#f0fdf4]' }
+      ? { label: 'Saved on this device', dot: 'bg-emerald-500', tone: 'bg-[#f0fdf4]' }
       : sync.state === 'loading'
         ? { label: 'Syncing', dot: 'bg-amber-500 animate-pulse', tone: 'bg-amber-50' }
         : sync.state === 'offline'
