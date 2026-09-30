@@ -33,6 +33,6 @@ jobs:
         with:
           node-version: 22
 
-      - uses: hrithiknl17/failfirst@v1
+      - uses: hrithiknl17/failfirst@phase1-cache-gate  # temporary: measuring caching; back to @v1 after
         with:
           gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
