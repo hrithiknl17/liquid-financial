@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AgentState, ChatTurn, ProposedAction, runAgent } from '../lib/agent';
+import { AgentSource, AgentState, ChatTurn, ProposedAction, runAgent } from '../lib/agent';
 import { AiUnavailableError } from '../lib/ai';
+import { displayDate } from '../lib/dates';
+import { money } from '../lib/format';
 import { ModalShell, ghostButtonClass, primaryButtonClass } from './ui';
 
 interface AgentModalProps {
@@ -12,7 +14,17 @@ interface AgentModalProps {
   /** Applies one confirmed proposal and returns what to show as the receipt. */
   onApply: (action: ProposedAction) => string;
   onOpenSettings: () => void;
+  /** Opens an entry an answer cited (closes the chat, shows the entry). */
+  onOpenSource: (source: AgentSource) => void;
 }
+
+const SOURCE_ICON: Record<AgentSource['kind'], string> = {
+  transaction: 'receipt_long',
+  vault_plan: 'autorenew',
+  holding: 'trending_up',
+  income_source: 'home_work',
+  loan: 'handshake',
+};
 
 /** A staged batch of writes, shown as one confirmation card under the reply. */
 interface Pending {
@@ -22,9 +34,9 @@ interface Pending {
 }
 
 const EXAMPLES = [
-  'Add 50 paise as my grocery bill',
+  'Where did I buy milk cheapest?',
+  'How much did I spend on groceries last month?',
   'Remove Airtel Fiber and add Jio Fiber at 999 a month',
-  'Sanjay paid 8000 rent today',
   'I lent 5000 to Ravi, expected back in 30 days',
 ];
 
@@ -36,6 +48,7 @@ export const AgentModal: React.FC<AgentModalProps> = ({
   onHistoryChange,
   onApply,
   onOpenSettings,
+  onOpenSource,
 }) => {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -43,6 +56,8 @@ export const AgentModal: React.FC<AgentModalProps> = ({
   const [needsKey, setNeedsKey] = useState(false);
   /** Keyed by the index of the model turn the proposals belong to. */
   const [pending, setPending] = useState<Record<number, Pending>>({});
+  /** Entries each answer relied on, keyed like `pending`. */
+  const [sources, setSources] = useState<Record<number, AgentSource[]>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -77,6 +92,10 @@ export const AgentModal: React.FC<AgentModalProps> = ({
 
       const withReply: ChatTurn[] = [...next, { role: 'model', text: reply }];
       onHistoryChange(withReply);
+
+      if (result.sources.length > 0) {
+        setSources((prev) => ({ ...prev, [withReply.length - 1]: result.sources }));
+      }
 
       if (result.actions.length > 0) {
         setPending((prev) => ({
@@ -123,9 +142,9 @@ export const AgentModal: React.FC<AgentModalProps> = ({
         <div ref={scrollRef} className="flex-1 overflow-y-auto pr-1 space-y-4">
           {history.length === 0 && (
             <div className="text-center py-6">
-              <p className="font-display font-black text-lg text-slate-900">Tell it what changed.</p>
+              <p className="font-display font-black text-lg text-slate-900">Ask anything, or tell it what changed.</p>
               <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mt-1 mb-5">
-                Plain words. It proposes, you confirm.
+                It reads your whole history. Changes wait for your yes.
               </p>
               <div className="flex flex-col gap-2 max-w-md mx-auto">
                 {EXAMPLES.map((example) => (
@@ -154,6 +173,35 @@ export const AgentModal: React.FC<AgentModalProps> = ({
                   {turn.text}
                 </div>
               </div>
+
+              {sources[index]?.length > 0 && (
+                <div className="pl-1">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1.5">
+                    From your ledger
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {sources[index].map((source) => (
+                      <button
+                        key={`${source.kind}-${source.id}`}
+                        onClick={() => onOpenSource(source)}
+                        title="Open this entry"
+                        className="flex items-center gap-1.5 max-w-full px-3 py-1.5 bg-[#ede9fe] border-2 border-slate-900 rounded-xl text-[11px] font-bold text-slate-800 shadow-[2px_2px_0px_0px_#0f172a] hover:-translate-y-0.5 transition-transform cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[15px] shrink-0">
+                          {source.hasBill ? 'receipt' : SOURCE_ICON[source.kind]}
+                        </span>
+                        <span className="truncate">{source.label}</span>
+                        {source.date && <span className="text-slate-500 shrink-0">{displayDate(source.date)}</span>}
+                        {source.amount !== undefined && (
+                          <span className="font-black text-slate-900 shrink-0">
+                            {money(Math.abs(source.amount), state.settings.currency)}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {pending[index] && (
                 <div className="space-y-2">

@@ -27,6 +27,7 @@ import {
   txToRow,
 } from './rowmap';
 import { Collection, deleteRow, flushQueue, onReconnect, pendingCount, writeRow } from './sync';
+import { requestReindex } from './ledgerSearch';
 
 export interface CloudData {
   transactions: Transaction[];
@@ -151,6 +152,8 @@ export function useCloudSync(userId: string | null, snapshot: Snapshot, onPulled
 
       pulled.current = true;
       setStatus({ state: 'synced', pending: pendingCount() });
+      // First sync on this device: also builds the index for an account that predates search.
+      requestReindex(1_000);
     } catch (error) {
       setStatus({
         state: navigator.onLine ? 'error' : 'offline',
@@ -206,6 +209,8 @@ export function useCloudSync(userId: string | null, snapshot: Snapshot, onPulled
             state: navigator.onLine ? 'synced' : 'offline',
             pending: pendingCount(),
           });
+          // Rows changed in the cloud: let the search index catch up.
+          requestReindex();
         }
       })();
     }, 900);

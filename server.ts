@@ -19,6 +19,7 @@ import express, { NextFunction, Request, Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { ALLOWED_MODELS, DEFAULT_MODEL } from './src/lib/prompts.js';
+import { EMBEDDING_MODEL, reindex, search, SearchConfig } from './server/search.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -29,6 +30,8 @@ const GOOGLE_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL?.trim();
 const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+// Search runs as the signed-in user, which PostgREST needs the public key for.
+const ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY?.trim();
 const CLOUDINARY_KEY = process.env.CLOUDINARY_API_KEY?.trim();
 const CLOUDINARY_SECRET = process.env.CLOUDINARY_API_SECRET?.trim();
 // Deleting a bill needs the cloud name too. The VITE_ copy already exists for
@@ -182,6 +185,8 @@ app.get('/api/ai/health', (_req, res) => {
     defaultModel: DEFAULT_MODEL,
     accounts: cloudReady,
     monthlyCap: AI_MONTHLY_CAP,
+    // Lets the browser choose indexed search or its own keyword fallback.
+    search: Boolean(searchConfig),
   });
 });
 
@@ -362,6 +367,72 @@ app.post('/api/uploads/destroy', async (req: Request, res: Response) => {
     res.status(response.ok ? 200 : 502).json(await response.json());
   } catch {
     res.status(502).json({ error: 'Cloudinary could not be reached.' });
+  }
+});
+
+/* ============================ LEDGER SEARCH ============================ */
+
+/** Search lives in the account database, so it exists only when accounts do. */
+const searchConfig: SearchConfig | null =
+  cloudReady && ANON_KEY && API_KEY && API_KEY !== 'MY_GEMINI_API_KEY'
+    ? { supabaseUrl: SUPABASE_URL as string, serviceRole: SERVICE_ROLE as string, anonKey: ANON_KEY, geminiKey: API_KEY }
+    : null;
+
+/** Signed-in, approved caller plus their raw token, or a response already sent. */
+async function searchCaller(req: Request, res: Response): Promise<{ caller: Caller; token: string } | null> {
+  if (!searchConfig) {
+    res.status(503).json({ error: 'Ledger search needs accounts (Supabase) and a Gemini key on the server.' });
+    return null;
+  }
+  const caller = await resolveCaller(req);
+  if (!caller) {
+    res.status(401).json({ error: 'Sign in to search your ledger.' });
+    return null;
+  }
+  if (!(await allowed(caller))) {
+    res.status(403).json({ error: 'This account is not on the allowlist yet.' });
+    return null;
+  }
+  return { caller, token: (req.header('authorization') ?? '').slice(7).trim() };
+}
+
+/**
+ * Brings the caller's search index in line with their rows. The browser only
+ * says "something changed"; what gets indexed is read from the database.
+ */
+app.post('/api/search/reindex', async (req: Request, res: Response) => {
+  const who = await searchCaller(req, res);
+  if (!who) return;
+  try {
+    res.json(await reindex(searchConfig as SearchConfig, who.caller.id));
+  } catch (error) {
+    console.error('Reindex failed:', (error as Error).message);
+    res.status(502).json({ error: 'Could not update the search index. It will retry on the next sync.' });
+  }
+});
+
+/** Hybrid search over the caller's own index. */
+app.post('/api/search', async (req: Request, res: Response) => {
+  const who = await searchCaller(req, res);
+  if (!who) return;
+
+  const { query, kinds, dateFrom, dateTo, category, limit } = req.body ?? {};
+  if (typeof query !== 'string' || !query.trim() || query.length > 300) {
+    res.status(400).json({ error: 'A query of up to 300 characters is required.' });
+    return;
+  }
+  try {
+    const results = await search(searchConfig as SearchConfig, who.token, query.trim(), {
+      kinds: Array.isArray(kinds) ? kinds.map(String) : undefined,
+      dateFrom: typeof dateFrom === 'string' ? dateFrom : undefined,
+      dateTo: typeof dateTo === 'string' ? dateTo : undefined,
+      category: typeof category === 'string' ? category : undefined,
+      limit: typeof limit === 'number' ? limit : undefined,
+    });
+    res.json({ results, embeddingModel: EMBEDDING_MODEL });
+  } catch (error) {
+    console.error('Search failed:', (error as Error).message);
+    res.status(502).json({ error: 'Search is unavailable right now.' });
   }
 });
 

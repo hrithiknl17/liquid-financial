@@ -11,8 +11,10 @@ import { displayDate, todayISO } from './dates';
 import { money } from './format';
 import { outstandingLoan } from './loans';
 import { callGemini } from './ai';
-import { buildAgentRequest } from './prompts';
+import { AgentContent, buildAgentRequest, READ_ONLY_TOOLS } from './prompts';
 import { categoryNames } from './categories';
+import { searchLedger } from './ledgerSearch';
+import { SearchArgs, summarizeSpending } from './ledgerTools';
 
 export interface AgentState {
   transactions: Transaction[];
@@ -40,9 +42,23 @@ export interface ProposedAction {
   destructive: boolean;
 }
 
+/** An entry an answer relied on, shown as a chip the user can open. */
+export interface AgentSource {
+  id: string;
+  kind: 'transaction' | 'vault_plan' | 'holding' | 'income_source' | 'loan';
+  label: string;
+  date?: string;
+  amount?: number;
+  /** A scanned bill photo exists for this entry. */
+  hasBill?: boolean;
+}
+
 export interface AgentResult {
   reply: string | null;
   actions: ProposedAction[];
+  sources: AgentSource[];
+  /** How many read-only lookups the answer took. */
+  lookups: number;
 }
 
 /**
@@ -178,35 +194,190 @@ function offsetDate(offset: number): string {
   return `${y}-${m}-${d}`;
 }
 
+/* ============================ SOURCES ============================ */
+
+/** Strips chunk prefixes ("tx:", "item:<id>:<n>") a model may echo back instead of the bare id. */
+function bareId(id: string): string {
+  const parts = id.split(':');
+  if (parts.length === 1) return id;
+  return parts[0] === 'item' ? parts[1] : parts.slice(1).join(':');
+}
+
+/** Turns cited ids into chips the UI can show and open. Unknown ids are dropped, never invented. */
+export function resolveSources(ids: string[], state: AgentState): AgentSource[] {
+  const out: AgentSource[] = [];
+  const seen = new Set<string>();
+  for (const raw of ids) {
+    const id = bareId(String(raw));
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const tx = state.transactions.find((entry) => entry.id === id);
+    if (tx) {
+      out.push({ id, kind: 'transaction', label: tx.merchant, date: tx.date, amount: tx.amount, hasBill: Boolean(tx.receiptId) });
+      continue;
+    }
+    const sub = state.subscriptions.find((entry) => entry.id === id);
+    if (sub) {
+      out.push({ id, kind: 'vault_plan', label: sub.name, date: sub.nextRenewal, amount: -sub.cost });
+      continue;
+    }
+    const inv = state.investments.find((entry) => entry.id === id);
+    if (inv) {
+      out.push({ id, kind: 'holding', label: inv.name, amount: inv.units * inv.currentPrice });
+      continue;
+    }
+    const src = state.incomeSources.find((entry) => entry.id === id);
+    if (src) {
+      out.push({ id, kind: 'income_source', label: src.name, amount: src.amount });
+      continue;
+    }
+    const loan = state.loans.find((entry) => entry.id === id);
+    if (loan) out.push({ id, kind: 'loan', label: loan.person, date: loan.date, amount: loan.principal });
+  }
+  return out.slice(0, 6);
+}
+
+/** Ids a tool result points at, used when the model forgets to cite. */
+function idsInResult(result: unknown): string[] {
+  const ids: string[] = [];
+  const visit = (value: unknown, key?: string) => {
+    if (Array.isArray(value)) value.forEach((entry) => visit(entry));
+    else if (value && typeof value === 'object') {
+      for (const [k, v] of Object.entries(value)) visit(v, k);
+    } else if (typeof value === 'string' && (key === 'id' || key === 'sourceId' || key === 'transactionId')) {
+      ids.push(value);
+    }
+  };
+  visit(result);
+  return ids;
+}
+
+/* ============================ THE LOOP ============================ */
+
+type Part = {
+  text?: string;
+  thought?: boolean;
+  functionCall?: { id?: string; name: string; args?: Record<string, unknown> };
+};
+
+/** Lookups per question before giving up; each round is one model call. */
+const MAX_TOOL_ROUNDS = 4;
+
+async function runReadTool(name: string, args: Record<string, unknown>, state: AgentState) {
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+  const list = (v: unknown) => (Array.isArray(v) ? v.map(String).filter(Boolean) : undefined);
+
+  if (name === 'search_ledger') {
+    const outcome = await searchLedger(
+      { ...state, currency: state.settings.currency },
+      {
+        query: str(args.query) ?? '',
+        kinds: list(args.kinds) as SearchArgs['kinds'],
+        dateFrom: str(args.dateFrom),
+        dateTo: str(args.dateTo),
+        category: str(args.category),
+        limit: typeof args.limit === 'number' ? args.limit : undefined,
+      }
+    );
+    return {
+      mode: outcome.mode,
+      count: outcome.hits.length,
+      // Ids and the text that matched; amounts are signed (negative = money out).
+      results: outcome.hits.map((hit) => ({
+        sourceId: hit.sourceId,
+        kind: hit.kind,
+        text: hit.content,
+        date: hit.date ?? undefined,
+        amount: hit.amount ?? undefined,
+      })),
+    };
+  }
+
+  return summarizeSpending(state.transactions, {
+    merchants: list(args.merchants),
+    categories: list(args.categories),
+    item: str(args.item),
+    dateFrom: str(args.dateFrom),
+    dateTo: str(args.dateTo),
+    direction: args.direction === 'in' ? 'in' : 'out',
+  });
+}
+
 /**
  * Sends the conversation to Gemini and turns its tool calls into proposals.
- * Nothing is applied here — the caller confirms first.
+ *
+ * Read-only lookups (search_ledger, summarize_spending) run here, in a short
+ * loop, and their results go back to the model so it can look again or
+ * answer. Writes still stop at proposals: nothing is applied here, the caller
+ * confirms first.
  */
 export async function runAgent(history: ChatTurn[], state: AgentState): Promise<AgentResult> {
-  const request = buildAgentRequest(
-    history,
-    buildContext(state),
-    todayISO(),
-    state.settings.currency,
-    // Both kinds: the agent logs income as readily as spending.
-    [...categoryNames('expense', state.categories), ...categoryNames('income', state.categories)]
-  );
+  const toolTurns: AgentContent[] = [];
+  const toolIds: string[] = [];
+  let lookups = 0;
 
-  const payload = await callGemini('agent', request, state.settings, { raw: true });
+  for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+    const request = buildAgentRequest(
+      history,
+      buildContext(state),
+      todayISO(),
+      state.settings.currency,
+      // Both kinds: the agent logs income as readily as spending.
+      [...categoryNames('expense', state.categories), ...categoryNames('income', state.categories)],
+      toolTurns
+    );
 
-  const parts =
-    (payload as {
-      candidates?: { content?: { parts?: { text?: string; functionCall?: { name: string; args?: Record<string, unknown> } }[] } }[];
-    }).candidates?.[0]?.content?.parts ?? [];
+    const payload = await callGemini('agent', request, state.settings, { raw: true });
+    const content = (payload as { candidates?: { content?: { role?: string; parts?: Part[] } }[] }).candidates?.[0]?.content;
+    const parts = content?.parts ?? [];
 
+    const reads = parts.filter((part) => part.functionCall && READ_ONLY_TOOLS.has(part.functionCall.name));
+    const otherCalls = parts.filter((part) => part.functionCall && !READ_ONLY_TOOLS.has(part.functionCall.name));
+
+    if (reads.length > 0 && otherCalls.length === 0 && round < MAX_TOOL_ROUNDS) {
+      // Replay the model's turn exactly as sent: Gemini 3 signs its tool calls
+      // and rejects a follow-up that drops or edits them.
+      toolTurns.push({ role: 'model', parts: parts as Record<string, unknown>[] });
+      const responses: Record<string, unknown>[] = [];
+      for (const part of reads) {
+        const call = part.functionCall!;
+        let result: unknown;
+        try {
+          result = await runReadTool(call.name, call.args ?? {}, state);
+        } catch (error) {
+          result = { error: error instanceof Error ? error.message : 'Lookup failed' };
+        }
+        lookups += 1;
+        toolIds.push(...idsInResult(result));
+        responses.push({ functionResponse: { ...(call.id ? { id: call.id } : {}), name: call.name, response: { result } } });
+      }
+      toolTurns.push({ role: 'user', parts: responses });
+      continue;
+    }
+
+    return finish(parts, state, toolIds, lookups);
+  }
+
+  return {
+    reply: 'I could not finish looking that up. Try a narrower question, like one merchant or one month.',
+    actions: [],
+    sources: [],
+    lookups,
+  };
+}
+
+function finish(parts: Part[], state: AgentState, toolIds: string[], lookups: number): AgentResult {
   const actions: ProposedAction[] = [];
   const texts: string[] = [];
+  const cited: string[] = [];
 
   for (const part of parts) {
     if (part.functionCall) {
       const { name, args = {} } = part.functionCall;
+      if (READ_ONLY_TOOLS.has(name)) continue;
       if (name === 'answer') {
         texts.push(String(args.text ?? ''));
+        if (Array.isArray(args.sources)) cited.push(...args.sources.map(String));
         continue;
       }
       actions.push({
@@ -216,13 +387,18 @@ export async function runAgent(history: ChatTurn[], state: AgentState): Promise<
         summary: describe(name, args, state),
         destructive: DESTRUCTIVE.has(name),
       });
-    } else if (part.text?.trim()) {
+    } else if (part.text?.trim() && !part.thought) {
       texts.push(part.text.trim());
     }
   }
 
+  // Sources only make sense for an answer that looked something up.
+  const sources = lookups > 0 ? resolveSources(cited.length > 0 ? cited : toolIds.slice(0, 4), state) : [];
+
   return {
     reply: texts.length > 0 ? texts.join('\n\n') : null,
     actions,
+    sources,
+    lookups,
   };
 }

@@ -1220,6 +1220,25 @@ export default function App({
           setIsAgentOpen(false);
           setIsProfileOpen(true);
         }}
+        onOpenSource={(source) => {
+          // Same destinations as global search, so a cited entry opens where it lives.
+          setIsAgentOpen(false);
+          if (source.kind === 'transaction') {
+            const tx = transactions.find((entry) => entry.id === source.id);
+            if (tx) setSelectedTx(tx);
+            setActiveTab('ledger');
+          } else if (source.kind === 'vault_plan') {
+            const sub = subscriptions.find((entry) => entry.id === source.id);
+            if (sub) setSelectedSub(sub);
+            setActiveTab('vault');
+          } else if (source.kind === 'holding') {
+            const inv = investments.find((entry) => entry.id === source.id);
+            if (inv) setSelectedInv(inv);
+            setActiveTab('invest');
+          } else {
+            setActiveTab('income');
+          }
+        }}
       />
 
       <ProfileModal
