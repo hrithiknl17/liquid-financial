@@ -43,6 +43,84 @@ all"); deletions are marked as destructive. It sees a compact snapshot of your l
 vault, holdings, sources and loans — including ids — so "airtel air cyber" still resolves to
 the Airtel Fiber plan. Amounts are exact: 50 paise is 0.5, never 50.
 
+## Questions about your whole history (RAG)
+
+Ask Liquid can also answer questions it can't see in its 12-entry context: *"Where did I buy
+milk cheapest?"*, *"How much went on food delivery in March?"*, *"Find that electrician
+bill."* It looks things up across everything you have ever logged, answers with exact
+numbers, and shows the entries it used as chips you can tap to open the bill.
+
+```mermaid
+flowchart LR
+  subgraph Browser
+    UI[Ask Liquid] --> Loop[agent loop<br/>src/lib/agent.ts]
+    Loop -->|search_ledger| S[ledgerSearch.ts]
+    Loop -->|summarize_spending| T[exact totals<br/>ledgerTools.ts]
+    S -. offline / no account .-> KW[BM25 keyword search<br/>same chunk text]
+  end
+  subgraph "Express server"
+    G["/api/ai/generate<br/>model fallback"]
+    Q["/api/search"]
+    R["/api/search/reindex"]
+  end
+  subgraph Supabase
+    DB[(ledger tables)]
+    LC[(ledger_chunks<br/>pgvector + tsvector)]
+    F[[search_ledger<br/>hybrid RRF, RLS]]
+  end
+  Loop --> G --> Gemini[Gemini]
+  S --> Q -->|user's own JWT| F --> LC
+  R -->|service role| DB
+  R -->|embed changed chunks| Gemini
+  R --> LC
+```
+
+**How a question is answered.** The model gets two read-only tools and a short loop
+(up to four rounds) in which it can call them before answering:
+
+- `search_ledger` **finds**. It runs hybrid retrieval over a per-account index: vector
+  similarity on 768-d Gemini embeddings, so "food delivery" finds Swiggy and Zomato, fused
+  with full-text matching for exact names and amounts.
+- `summarize_spending` **counts**. It computes exact totals, averages, per-merchant splits
+  and cheapest unit prices over *every* transaction, in whole paise.
+
+The split is deliberate. Search returns the top matches, so a total built from search
+results would silently miss entries below the cutoff, and a language model adding money is
+how wrong numbers happen. So the model finds and explains; code does all the arithmetic. Writes
+still go through the confirm cards; the lookups change nothing, so they run without asking.
+
+**Design decisions**
+
+| Decision | Why |
+|---|---|
+| One chunk per bill **line item**, plus one per transaction, plan, holding, income source, loan | "Where did I buy milk" is about one row on a bill; a whole-basket chunk buries it |
+| Index rebuilt by **reconcile**, not events: the server re-reads the account's rows, hashes each chunk, embeds only what changed, deletes what vanished | Idempotent and self-healing: missed syncs, second devices and deletions all converge. Unchanged data costs no embedding calls |
+| The server reads rows from the database to index; the browser only says "something changed" | Nobody can plant text in an index, including their own |
+| Search runs **in Postgres with the caller's own token** (`security invoker`), behind row-level security | The database, not the server, decides whose rows are visible. Writes to the index are service-role only |
+| **Exact** vector scan per account, no HNSW index | An approximate index ranks the whole table, then filters to one account, and can return too few rows. At thousands of chunks per account an exact scan takes milliseconds. The migration says when to switch |
+| Hybrid fusion with keyword weight **0.25** | Picked by the eval below: equal weight let generic words ("bill") outrank meaning |
+| Same chunk text powers an **offline BM25 fallback** in the browser | Demo and local-only users still get a working lookup with no key and no network |
+
+**Measured, not assumed.** `npm run eval` indexes the sample ledger with real
+embeddings into the real migration (PGlite + pgvector) and asks 34 labelled questions:
+words that appear in the entry, paraphrases that share no words with it, and exact
+identifiers such as tickers and amounts.
+
+| Mode | Hit@1 | Recall@5 | MRR | Paraphrases, Recall@5 |
+|---|---|---|---|---|
+| Keyword only (offline fallback) | 68% | 66% | 0.68 | 24% |
+| Vector only | 100% | 100% | 1.00 | 100% |
+| **Hybrid (shipped)** | **100%** | **99%** | **1.00** | **98%** |
+
+Full per-question results: [`eval/RESULTS.md`](eval/RESULTS.md). The sample ledger is small (55
+chunks), so treat these as a regression baseline rather than a benchmark. On it, vector-only is as
+good as hybrid; the keyword half stays, at a low weight, as a safety net for exact names in larger
+ledgers.
+
+**Setup.** Run `supabase/migrations/005_ledger_search.sql` in the Supabase SQL editor. No new
+keys: it uses the Gemini key and Supabase keys the server already has. `EMBEDDING_MODEL`
+(default `gemini-embedding-001`) is optional. Existing accounts are indexed on their next sync.
+
 ## IPOs
 
 Pick asset class **IPO** and describe the application in lots, lot size and cut-off price.
@@ -128,6 +206,8 @@ npm run dev      # http://localhost:3000 — proxies /api to the server on 3001
 npm start        # the server alone (expects an existing dist/)
 npm run serve    # build + serve, the one-liner for daily use
 npm run lint     # typecheck
+npm test         # unit tests + the search migration run in PGlite (no network)
+npm run eval     # retrieval eval with real embeddings (needs GEMINI_API_KEY)
 ```
 
 ## Use it on your phone
@@ -239,6 +319,10 @@ src/
   components/  one file per screen, plus capture/detail modals and shared UI
   data/        default settings and the on-demand sample dataset
   types.ts     the data model
-server.ts      optional express server: key custody + static hosting
+server.ts      optional express server: key custody, model fallback, uploads, static hosting
+server/        ledger search: chunk embedding, reconcile indexer, hybrid search
+supabase/      schema and migrations (005 = search index + search_ledger)
+tests/         node:test suites, including the search SQL run in PGlite
+eval/          retrieval eval and its latest results
 public/        PWA manifest, icons, service worker (share target + nudges)
 ```

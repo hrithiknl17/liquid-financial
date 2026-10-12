@@ -353,16 +353,67 @@ export const agentTools = (categories?: string[]) => [
     },
   },
   {
+    name: 'search_ledger',
+    description:
+      "Find entries anywhere in the user's history by meaning and keywords: past transactions, individual " +
+      'bill line items (e.g. "milk"), Vault plans, holdings, income sources, loans. Returns the best matches ' +
+      'with ids, not every match. Read-only; runs immediately.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        query: { type: S, description: 'What to look for, in plain words, e.g. "food delivery", "milk", "electrician bill"' },
+        kinds: {
+          type: 'ARRAY',
+          items: { type: S, enum: ['transaction', 'line_item', 'vault_plan', 'holding', 'income_source', 'loan'] },
+          description: 'Restrict to these kinds. line_item for questions about a product on a bill.',
+        },
+        dateFrom: { type: S, description: 'YYYY-MM-DD, inclusive' },
+        dateTo: { type: S, description: 'YYYY-MM-DD, inclusive' },
+        category: { type: S },
+        limit: { type: N, description: 'Max results, default 15' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'summarize_spending',
+    description:
+      'Exact totals over ALL matching transactions (not just search results): count, total, average, largest, ' +
+      'per-merchant and per-month breakdown. With "item", analyses bill line items instead: cheapest and dearest ' +
+      'unit price with store and date, per-store averages. Read-only; runs immediately. Use this for every number.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        merchants: { type: 'ARRAY', items: { type: S }, description: 'Merchant names, matched case-insensitively' },
+        categories: { type: 'ARRAY', items: { type: S } },
+        item: { type: S, description: 'A bill line item to analyse, e.g. "milk"' },
+        dateFrom: { type: S, description: 'YYYY-MM-DD, inclusive' },
+        dateTo: { type: S, description: 'YYYY-MM-DD, inclusive' },
+        direction: { type: S, enum: ['out', 'in'], description: 'Money out (default) or money in' },
+      },
+    },
+  },
+  {
     name: 'answer',
     description:
       'Reply without changing anything — for questions, summaries, or when you need the user to clarify.',
     parameters: {
       type: 'OBJECT',
-      properties: { text: { type: S } },
+      properties: {
+        text: { type: S },
+        sources: {
+          type: 'ARRAY',
+          items: { type: S },
+          description: 'Ids of the entries this answer relies on (transaction, plan, holding, source or loan ids), most relevant first, at most 6',
+        },
+      },
       required: ['text'],
     },
   },
 ];
+
+/** Tools that only read: the app runs them itself and feeds the result back. */
+export const READ_ONLY_TOOLS = new Set(['search_ledger', 'summarize_spending']);
 
 const AGENT_INSTRUCTIONS = `You are the assistant inside Liquid, a personal finance tracker. You turn plain requests into precise changes to the user's own data.
 
@@ -374,14 +425,28 @@ Rules:
 - Dates: "yesterday" is -1, unstated is 0 (today). Never a future date.
 - Missing detail gets a sensible default, not a question: unstated category is inferred from the merchant, unstated payment method is left out, unstated renewal is 30 days.
 - Never invent an id. If nothing in the context matches what the user named, say so with "answer".
-- You are proposing changes, not applying them — the user confirms every write. So be decisive rather than asking permission.`;
+- You are proposing changes, not applying them — the user confirms every write. So be decisive rather than asking permission.
+
+Questions about history (the CONTEXT block only shows the 12 most recent transactions):
+- Anything older, or a product on a bill, a merchant, "when did I…", "where did I buy…": call search_ledger first. Use the merchant and item names it returns, not your guess at them.
+- Every total, count, average, comparison or "cheapest" comes from summarize_spending. Never add, average or compare amounts yourself — not even two of them.
+- Resolve names with search_ledger, then pass the exact merchant or item names to summarize_spending. Turn "March", "last month", "this year" into dateFrom/dateTo yourself.
+- Finish with "answer": state the numbers exactly as the tools returned them, with the currency, and put the ids you relied on in sources. If the tools found nothing, say so plainly; never fill the gap.`;
+
+/** One turn as Gemini sees it; tool turns carry functionCall/functionResponse parts. */
+export interface AgentContent {
+  role: 'user' | 'model';
+  parts: Record<string, unknown>[];
+}
 
 export function buildAgentRequest(
   history: { role: 'user' | 'model'; text: string }[],
   contextBlock: string,
   todayISO: string,
   currency: string,
-  categories?: string[]
+  categories?: string[],
+  /** Tool calls and results from this question so far, appended after the chat. */
+  toolTurns: AgentContent[] = []
 ) {
   return {
     systemInstruction: {
@@ -391,7 +456,7 @@ export function buildAgentRequest(
         },
       ],
     },
-    contents: history.map((turn) => ({ role: turn.role, parts: [{ text: turn.text }] })),
+    contents: [...history.map((turn) => ({ role: turn.role, parts: [{ text: turn.text }] })), ...toolTurns],
     tools: [{ functionDeclarations: agentTools(categories) }],
     generationConfig: { temperature: 0 },
   };

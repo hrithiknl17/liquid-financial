@@ -1,4 +1,5 @@
 import { Category, LineItem, Settings, Transaction } from '../types';
+import { accessToken } from './cloud';
 import { addDays, todayISO } from './dates';
 import { iconForCategory } from './finance';
 import { uid } from './storage';
@@ -21,6 +22,8 @@ export interface AiStatus {
 }
 
 let cachedProxy: boolean | null = null;
+/** Whether the server also offers indexed ledger search (set by the same probe). */
+let cachedSearch = false;
 
 /** One probe per page load: is a key-holding server sitting in front of us? */
 async function proxyAvailable(): Promise<boolean> {
@@ -33,13 +36,20 @@ async function proxyAvailable(): Promise<boolean> {
     if (!res.ok) {
       cachedProxy = false;
     } else {
-      const body = (await res.json()) as { keyConfigured?: boolean };
+      const body = (await res.json()) as { keyConfigured?: boolean; search?: boolean };
       cachedProxy = Boolean(body.keyConfigured);
+      cachedSearch = Boolean(body.search);
     }
   } catch {
     cachedProxy = false;
   }
   return cachedProxy;
+}
+
+/** True when the server can search an indexed copy of this account's ledger. */
+export async function serverSearchAvailable(): Promise<boolean> {
+  await proxyAvailable();
+  return cachedSearch;
 }
 
 export async function aiStatus(settings: Settings): Promise<AiStatus> {
@@ -95,12 +105,18 @@ export async function callGemini(
     );
   }
 
+  // With accounts on, the proxy only spends the shared key for a signed-in
+  // caller, so it needs to know who this is.
+  const token = viaProxy ? await accessToken() : null;
+  const proxyHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) proxyHeaders.Authorization = `Bearer ${token}`;
+
   // Without a deadline a stalled upstream leaves the sheet spinning forever.
   const send = (): Promise<Response> =>
     viaProxy
       ? fetch('/api/ai/generate', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: proxyHeaders,
           body: JSON.stringify({ operation, model, body }),
           signal: AbortSignal.timeout(timeoutMs),
         })

@@ -19,6 +19,7 @@ import express, { NextFunction, Request, Response } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { ALLOWED_MODELS, DEFAULT_MODEL } from './src/lib/prompts.js';
+import { EMBEDDING_MODEL, reindex, search, SearchConfig } from './server/search.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -29,6 +30,8 @@ const GOOGLE_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL?.trim();
 const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+// Search runs as the signed-in user, which PostgREST needs the public key for.
+const ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY?.trim();
 const CLOUDINARY_KEY = process.env.CLOUDINARY_API_KEY?.trim();
 const CLOUDINARY_SECRET = process.env.CLOUDINARY_API_SECRET?.trim();
 // Deleting a bill needs the cloud name too. The VITE_ copy already exists for
@@ -153,6 +156,26 @@ async function meter(caller: Caller): Promise<{ ok: boolean; used: number }> {
   }
 }
 
+/**
+ * Tried in order after the requested model, when it is overloaded, rate
+ * limited, retired or silent. All on ALLOWED_MODELS and checked against the
+ * live model list.
+ */
+const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'];
+
+/** Upstream answers worth trying another model for; anything else is final. */
+const FALL_THROUGH = new Set([404, 429, 500, 502, 503, 504]);
+
+/**
+ * Server-side time budget per operation, kept just under the browser's own
+ * deadline in src/lib/ai.ts so the browser hears a real answer, not an abort.
+ */
+const OPERATION_BUDGET_MS: Record<'scan-bill' | 'quick-add' | 'agent', number> = {
+  'scan-bill': 40_000,
+  'quick-add': 13_000,
+  agent: 26_000,
+};
+
 // Bills are photographs; 25MB leaves room for an uncompressed capture.
 app.use(express.json({ limit: '25mb' }));
 
@@ -162,6 +185,8 @@ app.get('/api/ai/health', (_req, res) => {
     defaultModel: DEFAULT_MODEL,
     accounts: cloudReady,
     monthlyCap: AI_MONTHLY_CAP,
+    // Lets the browser choose indexed search or its own keyword fallback.
+    search: Boolean(searchConfig),
   });
 });
 
@@ -211,23 +236,48 @@ app.post('/api/ai/generate', async (req, res) => {
     }
   }
 
-  try {
-    const upstream = await fetch(`${GOOGLE_ENDPOINT}/${encodeURIComponent(chosenModel)}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': API_KEY },
-      body: JSON.stringify(body),
-      // Never hold a browser request open on a stalled upstream.
-      signal: AbortSignal.timeout(40_000),
-    });
+  // A single overloaded model used to fail the whole request (503s, or a hang
+  // until the deadline). Fall through to the next model instead, inside a
+  // budget that ends before the browser's own timeout for this operation.
+  const chain = [chosenModel, ...FALLBACK_MODELS.filter((m) => m !== chosenModel)];
+  const deadline = Date.now() + OPERATION_BUDGET_MS[operation];
+  const payload = JSON.stringify(body);
+  let last: { status: number; text: string } | null = null;
 
-    const text = await upstream.text();
-    res.status(upstream.status).type('application/json').send(text);
-  } catch (error) {
-    const timedOut = error instanceof Error && error.name === 'TimeoutError';
-    res
-      .status(timedOut ? 504 : 502)
-      .json({ error: timedOut ? 'Gemini did not answer in time.' : `Could not reach Gemini: ${(error as Error).message}` });
+  for (let i = 0; i < chain.length; i++) {
+    const remaining = deadline - Date.now();
+    if (remaining < 1_000) break;
+    // The first model gets most of the budget, so a slow-but-working call is
+    // not cut short; the fallbacks share what is left.
+    const slice = i === 0 ? remaining * 0.55 : remaining / (chain.length - i);
+
+    try {
+      const upstream = await fetch(`${GOOGLE_ENDPOINT}/${encodeURIComponent(chain[i])}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': API_KEY },
+        body: payload,
+        signal: AbortSignal.timeout(Math.max(1_000, slice)),
+      });
+      const text = await upstream.text();
+      if (!FALL_THROUGH.has(upstream.status)) {
+        if (i > 0) console.warn(`Gemini ${chain[0]} unavailable; served by ${chain[i]}.`);
+        res.status(upstream.status).set('X-Liquid-Model', chain[i]).type('application/json').send(text);
+        return;
+      }
+      last = { status: upstream.status, text };
+    } catch (error) {
+      const timedOut = error instanceof Error && error.name === 'TimeoutError';
+      last = {
+        status: timedOut ? 504 : 502,
+        text: JSON.stringify({
+          error: timedOut ? 'Gemini did not answer in time.' : `Could not reach Gemini: ${(error as Error).message}`,
+        }),
+      };
+    }
   }
+
+  const failed = last ?? { status: 504, text: JSON.stringify({ error: 'Gemini did not answer in time.' }) };
+  res.status(failed.status).type('application/json').send(failed.text);
 });
 
 /**
@@ -317,6 +367,72 @@ app.post('/api/uploads/destroy', async (req: Request, res: Response) => {
     res.status(response.ok ? 200 : 502).json(await response.json());
   } catch {
     res.status(502).json({ error: 'Cloudinary could not be reached.' });
+  }
+});
+
+/* ============================ LEDGER SEARCH ============================ */
+
+/** Search lives in the account database, so it exists only when accounts do. */
+const searchConfig: SearchConfig | null =
+  cloudReady && ANON_KEY && API_KEY && API_KEY !== 'MY_GEMINI_API_KEY'
+    ? { supabaseUrl: SUPABASE_URL as string, serviceRole: SERVICE_ROLE as string, anonKey: ANON_KEY, geminiKey: API_KEY }
+    : null;
+
+/** Signed-in, approved caller plus their raw token, or a response already sent. */
+async function searchCaller(req: Request, res: Response): Promise<{ caller: Caller; token: string } | null> {
+  if (!searchConfig) {
+    res.status(503).json({ error: 'Ledger search needs accounts (Supabase) and a Gemini key on the server.' });
+    return null;
+  }
+  const caller = await resolveCaller(req);
+  if (!caller) {
+    res.status(401).json({ error: 'Sign in to search your ledger.' });
+    return null;
+  }
+  if (!(await allowed(caller))) {
+    res.status(403).json({ error: 'This account is not on the allowlist yet.' });
+    return null;
+  }
+  return { caller, token: (req.header('authorization') ?? '').slice(7).trim() };
+}
+
+/**
+ * Brings the caller's search index in line with their rows. The browser only
+ * says "something changed"; what gets indexed is read from the database.
+ */
+app.post('/api/search/reindex', async (req: Request, res: Response) => {
+  const who = await searchCaller(req, res);
+  if (!who) return;
+  try {
+    res.json(await reindex(searchConfig as SearchConfig, who.caller.id));
+  } catch (error) {
+    console.error('Reindex failed:', (error as Error).message);
+    res.status(502).json({ error: 'Could not update the search index. It will retry on the next sync.' });
+  }
+});
+
+/** Hybrid search over the caller's own index. */
+app.post('/api/search', async (req: Request, res: Response) => {
+  const who = await searchCaller(req, res);
+  if (!who) return;
+
+  const { query, kinds, dateFrom, dateTo, category, limit } = req.body ?? {};
+  if (typeof query !== 'string' || !query.trim() || query.length > 300) {
+    res.status(400).json({ error: 'A query of up to 300 characters is required.' });
+    return;
+  }
+  try {
+    const results = await search(searchConfig as SearchConfig, who.token, query.trim(), {
+      kinds: Array.isArray(kinds) ? kinds.map(String) : undefined,
+      dateFrom: typeof dateFrom === 'string' ? dateFrom : undefined,
+      dateTo: typeof dateTo === 'string' ? dateTo : undefined,
+      category: typeof category === 'string' ? category : undefined,
+      limit: typeof limit === 'number' ? limit : undefined,
+    });
+    res.json({ results, embeddingModel: EMBEDDING_MODEL });
+  } catch (error) {
+    console.error('Search failed:', (error as Error).message);
+    res.status(502).json({ error: 'Search is unavailable right now.' });
   }
 });
 
