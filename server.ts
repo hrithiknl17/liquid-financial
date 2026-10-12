@@ -153,6 +153,26 @@ async function meter(caller: Caller): Promise<{ ok: boolean; used: number }> {
   }
 }
 
+/**
+ * Tried in order after the requested model, when it is overloaded, rate
+ * limited, retired or silent. All on ALLOWED_MODELS and checked against the
+ * live model list.
+ */
+const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'];
+
+/** Upstream answers worth trying another model for; anything else is final. */
+const FALL_THROUGH = new Set([404, 429, 500, 502, 503, 504]);
+
+/**
+ * Server-side time budget per operation, kept just under the browser's own
+ * deadline in src/lib/ai.ts so the browser hears a real answer, not an abort.
+ */
+const OPERATION_BUDGET_MS: Record<'scan-bill' | 'quick-add' | 'agent', number> = {
+  'scan-bill': 40_000,
+  'quick-add': 13_000,
+  agent: 26_000,
+};
+
 // Bills are photographs; 25MB leaves room for an uncompressed capture.
 app.use(express.json({ limit: '25mb' }));
 
@@ -211,23 +231,48 @@ app.post('/api/ai/generate', async (req, res) => {
     }
   }
 
-  try {
-    const upstream = await fetch(`${GOOGLE_ENDPOINT}/${encodeURIComponent(chosenModel)}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': API_KEY },
-      body: JSON.stringify(body),
-      // Never hold a browser request open on a stalled upstream.
-      signal: AbortSignal.timeout(40_000),
-    });
+  // A single overloaded model used to fail the whole request (503s, or a hang
+  // until the deadline). Fall through to the next model instead, inside a
+  // budget that ends before the browser's own timeout for this operation.
+  const chain = [chosenModel, ...FALLBACK_MODELS.filter((m) => m !== chosenModel)];
+  const deadline = Date.now() + OPERATION_BUDGET_MS[operation];
+  const payload = JSON.stringify(body);
+  let last: { status: number; text: string } | null = null;
 
-    const text = await upstream.text();
-    res.status(upstream.status).type('application/json').send(text);
-  } catch (error) {
-    const timedOut = error instanceof Error && error.name === 'TimeoutError';
-    res
-      .status(timedOut ? 504 : 502)
-      .json({ error: timedOut ? 'Gemini did not answer in time.' : `Could not reach Gemini: ${(error as Error).message}` });
+  for (let i = 0; i < chain.length; i++) {
+    const remaining = deadline - Date.now();
+    if (remaining < 1_000) break;
+    // The first model gets most of the budget, so a slow-but-working call is
+    // not cut short; the fallbacks share what is left.
+    const slice = i === 0 ? remaining * 0.55 : remaining / (chain.length - i);
+
+    try {
+      const upstream = await fetch(`${GOOGLE_ENDPOINT}/${encodeURIComponent(chain[i])}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': API_KEY },
+        body: payload,
+        signal: AbortSignal.timeout(Math.max(1_000, slice)),
+      });
+      const text = await upstream.text();
+      if (!FALL_THROUGH.has(upstream.status)) {
+        if (i > 0) console.warn(`Gemini ${chain[0]} unavailable; served by ${chain[i]}.`);
+        res.status(upstream.status).set('X-Liquid-Model', chain[i]).type('application/json').send(text);
+        return;
+      }
+      last = { status: upstream.status, text };
+    } catch (error) {
+      const timedOut = error instanceof Error && error.name === 'TimeoutError';
+      last = {
+        status: timedOut ? 504 : 502,
+        text: JSON.stringify({
+          error: timedOut ? 'Gemini did not answer in time.' : `Could not reach Gemini: ${(error as Error).message}`,
+        }),
+      };
+    }
   }
+
+  const failed = last ?? { status: 504, text: JSON.stringify({ error: 'Gemini did not answer in time.' }) };
+  res.status(failed.status).type('application/json').send(failed.text);
 });
 
 /**
