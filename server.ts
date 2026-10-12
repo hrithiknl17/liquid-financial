@@ -20,6 +20,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { ALLOWED_MODELS, DEFAULT_MODEL } from './src/lib/prompts.js';
 import { EMBEDDING_MODEL, reindex, search, SearchConfig } from './server/search.js';
+import { isBenched, orderModels, recordFailure, recordSuccess } from './server/modelHealth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -157,11 +158,11 @@ async function meter(caller: Caller): Promise<{ ok: boolean; used: number }> {
 }
 
 /**
- * Tried in order after the requested model, when it is overloaded, rate
- * limited, retired or silent. All on ALLOWED_MODELS and checked against the
- * live model list.
+ * Tried after the requested model when it is overloaded, rate limited, retired
+ * or silent, most dependable first. All on ALLOWED_MODELS and checked against
+ * the live model list; modelHealth.ts moves recently failed ones to the back.
  */
-const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'];
+const FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-3.5-flash'];
 
 /** Upstream answers worth trying another model for; anything else is final. */
 const FALL_THROUGH = new Set([404, 429, 500, 502, 503, 504]);
@@ -237,19 +238,20 @@ app.post('/api/ai/generate', async (req, res) => {
   }
 
   // A single overloaded model used to fail the whole request (503s, or a hang
-  // until the deadline). Fall through to the next model instead, inside a
-  // budget that ends before the browser's own timeout for this operation.
-  const chain = [chosenModel, ...FALLBACK_MODELS.filter((m) => m !== chosenModel)];
+  // until the deadline). Fall through to the next model instead — healthy
+  // ones first — inside a budget that ends before the browser's own timeout.
+  const chain = orderModels(chosenModel, FALLBACK_MODELS);
   const deadline = Date.now() + OPERATION_BUDGET_MS[operation];
   const payload = JSON.stringify(body);
+  const attempts: string[] = [];
   let last: { status: number; text: string } | null = null;
 
   for (let i = 0; i < chain.length; i++) {
     const remaining = deadline - Date.now();
     if (remaining < 1_000) break;
-    // The first model gets most of the budget, so a slow-but-working call is
-    // not cut short; the fallbacks share what is left.
-    const slice = i === 0 ? remaining * 0.55 : remaining / (chain.length - i);
+    // A healthy first model gets most of the budget, so a slow-but-working
+    // call is not cut short; the rest share what is left.
+    const slice = i === 0 && !isBenched(chain[0]) ? remaining * 0.55 : remaining / (chain.length - i);
 
     try {
       const upstream = await fetch(`${GOOGLE_ENDPOINT}/${encodeURIComponent(chain[i])}:generateContent`, {
@@ -260,13 +262,18 @@ app.post('/api/ai/generate', async (req, res) => {
       });
       const text = await upstream.text();
       if (!FALL_THROUGH.has(upstream.status)) {
-        if (i > 0) console.warn(`Gemini ${chain[0]} unavailable; served by ${chain[i]}.`);
+        recordSuccess(chain[i]);
+        if (chain[i] !== chosenModel) console.warn(`Gemini ${chosenModel} skipped or failed; served by ${chain[i]}.`);
         res.status(upstream.status).set('X-Liquid-Model', chain[i]).type('application/json').send(text);
         return;
       }
+      recordFailure(chain[i], upstream.status);
+      attempts.push(`${chain[i]} ${upstream.status}`);
       last = { status: upstream.status, text };
     } catch (error) {
       const timedOut = error instanceof Error && error.name === 'TimeoutError';
+      recordFailure(chain[i], 0);
+      attempts.push(`${chain[i]} ${timedOut ? 'timeout' : 'network error'}`);
       last = {
         status: timedOut ? 504 : 502,
         text: JSON.stringify({
@@ -276,6 +283,8 @@ app.post('/api/ai/generate', async (req, res) => {
     }
   }
 
+  // Every model failed: say which and how, so the next outage is one log line to read.
+  console.error(`Gemini ${operation} failed on every model: ${attempts.join(', ') || 'no time left'}.`);
   const failed = last ?? { status: 504, text: JSON.stringify({ error: 'Gemini did not answer in time.' }) };
   res.status(failed.status).type('application/json').send(failed.text);
 });
